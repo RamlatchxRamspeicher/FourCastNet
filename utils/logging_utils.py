@@ -22,11 +22,11 @@ def log_to_file(logger_name=None, log_level=logging.INFO, log_filename='tensorfl
   log.addHandler(fh)
 
 def log_versions():
-  import torch
-  import subprocess
-
-  logging.info('--------------- Versions ---------------')
-  logging.info('git branch: ' + str(subprocess.check_output(['git', 'branch']).strip()))
-  logging.info('git hash: ' + str(subprocess.check_output(['git', 'rev-parse', 'HEAD']).strip()))
-  logging.info('Torch: ' + str(torch.__version__))
-  logging.info('----------------------------------------')
+  # import torch
+  # import subprocess
+  pass
+  # logging.info('--------------- Versions ---------------')
+  # logging.info('git branch: ' + str(subprocess.check_output(['git', 'branch']).strip()))
+  # logging.info('git hash: ' + str(subprocess.check_output(['git', 'rev-parse', 'HEAD']).strip()))
+  # logging.info('Torch: ' + str(torch.__version__))
+  # logging.info('----------------------------------------')
