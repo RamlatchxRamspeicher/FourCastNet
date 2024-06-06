@@ -67,7 +67,6 @@ from networks.afnonet import AFNONet, PrecipNet
 from utils.img_utils import vis_precip
 import wandb
 from utils.weighted_acc_rmse import weighted_acc, weighted_rmse, weighted_rmse_torch, unlog_tp_torch
-from apex import optimizers
 from utils.darcy_loss import LpLoss
 import matplotlib.pyplot as plt
 from collections import OrderedDict
@@ -145,10 +144,7 @@ class Trainer():
     if params.log_to_wandb:
       wandb.watch(self.model)
 
-    if params.optimizer_type == 'FusedAdam':
-      self.optimizer = optimizers.FusedAdam(self.model.parameters(), lr = params.lr)
-    else:
-      self.optimizer = torch.optim.Adam(self.model.parameters(), lr = params.lr)
+    self.optimizer = torch.optim.Adam(self.model.parameters(), lr = params.lr)
 
     if params.enable_amp == True:
       self.gscaler = amp.GradScaler()
