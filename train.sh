@@ -20,7 +20,7 @@ module load mpi/openmpi/4.1
 BASE_DIR="/pfs/work7/workspace/scratch/hx9916-MA"
 VENVDIR=$BASE_DIR/.venvs/Fourcastv1
 
-config_file=./config/AFNO.yaml
+config_file=$BASE_DIR/FourCastNet/config/AFNO.yaml
 config='afno_backbone'
 run_num='0'
 
