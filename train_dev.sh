@@ -1,10 +1,10 @@
 #!/bin/bash 
 
 #SBATCH -t 0:30:00                      # wall-clock time limit
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:4
 #SBATCH -N 1                           # number of nodes to be used
 #SBATCH --cpus-per-gpu=8
-#SBATCH --ntasks-per-node=4
+#SBATCH --ntasks-per-node=1
 
 #SBATCH -J Testrun
 #SBATCH --output results/logs/slurm_afno_backbone_finetune-%j.out
