@@ -1,6 +1,6 @@
 #!/bin/bash 
 
-#SBATCH -t 0:30:00                      # wall-clock time limit
+#SBATCH -t 1:00:00                      # wall-clock time limit
 #SBATCH --gres=gpu:4
 #SBATCH -N 1                           # number of nodes to be used
 #SBATCH --cpus-per-gpu=8
@@ -8,7 +8,7 @@
 
 #SBATCH -J Testrun
 #SBATCH --output results/logs/slurm_afno_backbone_finetune-%j.out
-#SBATCH -p dev_gpu_4               # queue for resource allocation
+#SBATCH -p dev_accelerated               # queue for resource allocation
 #SBATCH --mail-type=ALL                    # Notify user by email when certain event types occur.
 
 # Set up modules.
