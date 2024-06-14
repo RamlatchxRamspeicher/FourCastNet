@@ -17,7 +17,7 @@ module load compiler/intel/2023.1.0              # Load required modules.
 module load mpi/openmpi/4.1
 
 
-BASE_DIR="/pfs/work7/workspace/scratch/hx9916-MA"
+BASE_DIR="/hkfs/work/workspace/scratch/ie5012-MA"
 VENVDIR=$BASE_DIR/.venvs/Fourcastv1
 
 config_file=$BASE_DIR/FourCastNet/config/AFNO.yaml
