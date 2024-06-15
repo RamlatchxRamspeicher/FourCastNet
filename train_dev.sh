@@ -18,7 +18,7 @@ module load mpi/openmpi/4.1
 
 
 BASE_DIR="/hkfs/work/workspace/scratch/ie5012-MA"
-VENVDIR=$BASE_DIR/.venvs/Fourcastv1
+VENVDIR=$BASE_DIR/.venvs/Fourcastv2
 
 config_file=$BASE_DIR/FourCastNet/config/AFNO.yaml
 config='afno_backbone'
