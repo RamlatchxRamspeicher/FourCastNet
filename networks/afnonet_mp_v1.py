@@ -20,22 +20,33 @@ from einops.layers.torch import Rearrange
 from utils.img_utils import PeriodicPad2d
 from mpi4py import MPI
 
+#TODO:
+#functions for communication, forward and backward pass MLP and AFNO2D
+#Split model size by world size MLP and AFNO2D
+#what is to be split and what is to be communicated
+#Dropout seeds plus epoch oder so -> über torch.randomseed oder test ob MLP dropout 1 benötigt
+
 
 class Mlp(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
         super().__init__()
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
+        #TODO:? split in hidden and out features by world size
         self.fc1 = nn.Linear(in_features, hidden_features)
         self.act = act_layer()
         self.fc2 = nn.Linear(hidden_features, out_features)
         self.drop = nn.Dropout(drop)
 
     def forward(self, x):
+        #MAYBE: function to split
         x = self.fc1(x)
         x = self.act(x)
+        #MAYBE: funciton to gather?
         x = self.drop(x)
+        #MAYBE: function to split?
         x = self.fc2(x)
+        #MAYBE: function to gather
         x = self.drop(x)
         return x
 
@@ -44,8 +55,8 @@ class AFNO2D(nn.Module):
     def __init__(self, hidden_size, num_blocks=8, sparsity_threshold=0.01, hard_thresholding_fraction=1, hidden_size_factor=1):
         super().__init__()
         assert hidden_size % num_blocks == 0, f"hidden_size {hidden_size} should be divisble by num_blocks {num_blocks}"
-
-        self.hidden_size = hidden_size #768
+        #TODO:? split hidden_size by world size?
+        self.hidden_size = hidden_size #768 
         self.sparsity_threshold = sparsity_threshold
         self.num_blocks = num_blocks #8
         self.block_size = self.hidden_size // self.num_blocks #96
@@ -211,7 +222,7 @@ class AFNONet(nn.Module):
         self.blocks = nn.ModuleList([
             Block(dim=embed_dim, mlp_ratio=mlp_ratio, drop=drop_rate, drop_path=dpr[i], norm_layer=norm_layer,
             num_blocks=self.num_blocks, sparsity_threshold=sparsity_threshold, hard_thresholding_fraction=hard_thresholding_fraction) 
-        for i in range(depth)])
+        for i in range(depth)]) #NumBlocks = Diagonalmatrix von Attention
 
         self.norm = norm_layer(embed_dim)
 
@@ -236,7 +247,7 @@ class AFNONet(nn.Module):
     def forward_features(self, x):
         B = x.shape[0]
         x = self.patch_embed(x)
-        x = x + self.pos_embed
+        x = x + self.pos_embed # TODO: Print pos_embed
         x = self.pos_drop(x)
         
         x = x.reshape(B, self.h, self.w, self.embed_dim)

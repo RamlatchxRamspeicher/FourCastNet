@@ -43,6 +43,18 @@
 #Pedram Hassanzadeh - Rice University 
 #Karthik Kashinath - NVIDIA Corporation 
 #Animashree Anandkumar - California Institute of Technology, NVIDIA Corporation
+REPLICATE = True
+if REPLICATE:
+    import random
+    import numpy as np
+    import torch
+
+    random.seed(42)
+    np.random.seed(42)
+    torch.manual_seed(42)
+
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 import os
 import time
