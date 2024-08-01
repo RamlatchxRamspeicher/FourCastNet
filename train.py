@@ -550,19 +550,20 @@ if __name__ == '__main__':
 
   params = YParams(os.path.abspath(args.yaml_config), args.config)
   params['epsilon_factor'] = args.epsilon_factor
+  from utils.comm import init, get_local_rank, get_world_rank, get_world_size
+  init("nccl-slurm")
+  params['world_size'] = get_world_size()
+  # if 'WORLD_SIZE' in os.environ:
+    # params['world_size'] = int(os.environ['WORLD_SIZE'])
 
-  params['world_size'] = 1
-  if 'WORLD_SIZE' in os.environ:
-    params['world_size'] = int(os.environ['WORLD_SIZE'])
-
-  world_rank = 0
-  local_rank = 0
+  world_rank = get_world_rank()
+  local_rank = get_local_rank()
   if params['world_size'] > 1:
-    dist.init_process_group(backend='nccl',
-                            init_method='env://')
-    local_rank = int(os.environ["LOCAL_RANK"])
+    # dist.init_process_group(backend='nccl',
+    #                         init_method='env://')
+    # local_rank = int(os.environ["LOCAL_RANK"])
     args.gpu = local_rank
-    world_rank = dist.get_rank()
+    # world_rank = dist.get_rank()
     params['global_batch_size'] = params.batch_size
     params['batch_size'] = int(params.batch_size//params['world_size'])
 
