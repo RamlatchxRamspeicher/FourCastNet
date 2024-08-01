@@ -98,6 +98,7 @@ afno_model_parallel:
   exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/fcn_original/model_parallel'
   pretrained_ckpt_path: '/hkfs/work/workspace/scratch/ie5012-MA/results/fcn_original/model_parallel/afno_backbone/0/training_checkpoints/best_ckpt.tar'
   batch_size: 2
+  nettype: 'afnodist'
   
 
 perturbations:

@@ -19,11 +19,14 @@ from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
 from utils.img_utils import PeriodicPad2d
 from mpi4py import MPI
-
+from utils.comm import get_world_size
+from utils.distributed_autograd import copy_to_parallel_region, gather_from_parallel_region, reduce_from_parallel_region, scatter_to_parallel_region, compute_split_shapes
+import torch.distributed as dist
+DEBUG = True
 #TODO:
-#functions for communication, forward and backward pass MLP and AFNO2D
-#Split model size by world size MLP and AFNO2D
-#what is to be split and what is to be communicated
+## DONE #functions for communication, forward and backward pass MLP and AFNO2D
+## DONE #Split model size by world size MLP and AFNO2D
+## DONE #what is to be split and what is to be communicated
 #Dropout seeds plus epoch oder so -> über torch.randomseed oder test ob MLP dropout 1 benötigt
 
 
@@ -32,39 +35,43 @@ class Mlp(nn.Module):
         super().__init__()
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
-        #TODO:? split in hidden and out features by world size
-        self.fc1 = nn.Linear(in_features, hidden_features)
+        hidden_features_local = hidden_features // get_world_size()
+        self.fc1 = nn.Linear(in_features, hidden_features_local)
         self.act = act_layer()
-        self.fc2 = nn.Linear(hidden_features, out_features)
+        self.fc2 = nn.Linear(hidden_features_local, out_features)
         self.drop = nn.Dropout(drop)
+        self.gather_shapes = compute_split_shapes(
+                in_features, get_world_size()
+            )
 
     def forward(self, x):
-        #MAYBE: function to split
+        x = gather_from_parallel_region(x, dim=1, shapes=self.gather_shapes,group=None)
+        x = copy_to_parallel_region(x, group=None)
         x = self.fc1(x)
         x = self.act(x)
-        #MAYBE: funciton to gather?
         x = self.drop(x)
-        #MAYBE: function to split?
         x = self.fc2(x)
-        #MAYBE: function to gather
+        x = reduce_from_parallel_region(x, group=None)
         x = self.drop(x)
+        x = scatter_to_parallel_region(x, dim=1, group=None)
         return x
 
 
 class AFNO2D(nn.Module):
     def __init__(self, hidden_size, num_blocks=8, sparsity_threshold=0.01, hard_thresholding_fraction=1, hidden_size_factor=1):
         super().__init__()
-        assert hidden_size % num_blocks == 0, f"hidden_size {hidden_size} should be divisble by num_blocks {num_blocks}"
-        #TODO:? split hidden_size by world size?
+        world_size = get_world_size()
+        assert hidden_size % (num_blocks*world_size) == 0, f"hidden_size {hidden_size} should be divisble by {world_size*num_blocks} (num_blocks {num_blocks} * world_size {world_size})"
+        
         self.hidden_size = hidden_size #768 
         self.sparsity_threshold = sparsity_threshold
         self.num_blocks = num_blocks #8
-        self.block_size = self.hidden_size // self.num_blocks #96
+        self.block_size = (self.hidden_size // self.num_blocks) //get_world_size() #96/world_size
         self.hard_thresholding_fraction = hard_thresholding_fraction
         self.hidden_size_factor = hidden_size_factor
         self.scale = 0.02
 
-        # w1.shape = 2, 8, 96, 768; w2.shape = 2, 8, 768, 96; b1.shape = 2, 8, 768; b2.shape = 2, 8, 96
+        # w1.shape = 2, 8, 96/world_size, 768; w2.shape = 2, 8, 768, 96/world_size; b1.shape = 2, 8, 768; b2.shape = 2, 8, 96/world_size
         self.w1 = nn.Parameter(self.scale * torch.randn(2, self.num_blocks, self.block_size, self.block_size * self.hidden_size_factor))
         self.b1 = nn.Parameter(self.scale * torch.randn(2, self.num_blocks, self.block_size * self.hidden_size_factor))
         self.w2 = nn.Parameter(self.scale * torch.randn(2, self.num_blocks, self.block_size * self.hidden_size_factor, self.block_size))
@@ -78,7 +85,7 @@ class AFNO2D(nn.Module):
         B, H, W, C = x.shape #64, 720, 1440, 768 = 64*720*1440*768 = 50960793600
 
         x = torch.fft.rfft2(x, dim=(1, 2), norm="ortho")
-        x = x.reshape(B, H, W // 2 + 1, self.num_blocks, self.block_size) #64, 720, 721, 8, 96 = 64*720*721*8*96 = 25515786240
+        x = x.reshape(B, H, W // 2 + 1, self.num_blocks, self.block_size) #64, 720, 721, 8, 96/world_size = 64*720*721*8*96/world_size = 25515786240
 
         o1_real = torch.zeros([B, H, W // 2 + 1, self.num_blocks, self.block_size * self.hidden_size_factor], device=x.device)
         o1_imag = torch.zeros([B, H, W // 2 + 1, self.num_blocks, self.block_size * self.hidden_size_factor], device=x.device)
@@ -93,29 +100,29 @@ class AFNO2D(nn.Module):
             torch.einsum('...bi,bio->...bo', x[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes].real, self.w1[0]) - \
             torch.einsum('...bi,bio->...bo', x[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes].imag, self.w1[1]) + \
             self.b1[0]
-        ) #64, 720, 721, 8, 96 x 8, 96, 768 = 64, 720, 721, 8, 768
+        ) #64, 720, 721, 8, 96/world_size x 8, 96/world_size, 768 = 64, 720, 721, 8, 768
 
         o1_imag[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes] = F.relu(
             torch.einsum('...bi,bio->...bo', x[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes].imag, self.w1[0]) + \
             torch.einsum('...bi,bio->...bo', x[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes].real, self.w1[1]) + \
             self.b1[1]
-        ) #64, 720, 721, 8, 96 x 8, 96, 768 = 64, 720, 721, 8, 768
+        ) #64, 720, 721, 8, 96/world_size x 8, 96/world_size, 768 = 64, 720, 721, 8, 768
 
         o2_real[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes]  = (
             torch.einsum('...bi,bio->...bo', o1_real[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes], self.w2[0]) - \
             torch.einsum('...bi,bio->...bo', o1_imag[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes], self.w2[1]) + \
             self.b2[0]
-        ) #64, 720, 721, 8, 768 x 8, 768, 96 = 64, 720, 721, 8, 96
+        ) #64, 720, 721, 8, 768 x 8, 768, 96/world_size = 64, 720, 721, 8, 96/world_size
 
         o2_imag[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes]  = (
             torch.einsum('...bi,bio->...bo', o1_imag[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes], self.w2[0]) + \
             torch.einsum('...bi,bio->...bo', o1_real[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes], self.w2[1]) + \
             self.b2[1]
-        ) #64, 720, 721, 8, 768 x 8, 768, 96 = 64, 720, 721, 8, 96
+        ) #64, 720, 721, 8, 768 x 8, 768, 96/world_size = 64, 720, 721, 8, 96/world_size
 
-        x = torch.stack([o2_real, o2_imag], dim=-1) #64, 720, 721, 8, 96, 2
+        x = torch.stack([o2_real, o2_imag], dim=-1) #64, 720, 721, 8, 96/world_size, 2
         x = F.softshrink(x, lambd=self.sparsity_threshold)
-        x = torch.view_as_complex(x) #64, 720, 721, 8, 96
+        x = torch.view_as_complex(x) #64, 720, 721, 8, 96/world_size
         x = x.reshape(B, H, W // 2 + 1, C) # 64, 720, 721, 768
         x = torch.fft.irfft2(x, s=(H, W), dim=(1,2), norm="ortho") #64, 720, 1440, 768
         x = x.type(dtype)
@@ -135,19 +142,25 @@ class Block(nn.Module):
             double_skip=True,
             num_blocks=8,
             sparsity_threshold=0.01,
-            hard_thresholding_fraction=1.0
+            hard_thresholding_fraction=1.0,
+            input_parallel=False,
+            output_parallel=False
         ):
         super().__init__()
+        self.input_parallel = input_parallel
+        self.output_parallel = output_parallel
         self.norm1 = norm_layer(dim)
         self.filter = AFNO2D(dim, num_blocks, sparsity_threshold, hard_thresholding_fraction) 
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-        #self.drop_path = nn.Identity()
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
         self.double_skip = double_skip
 
     def forward(self, x):
+        if not self.input_parallel:
+            scatter_shapes = compute_split_shapes(x.shape[1], get_world_size())
+            x = scatter_to_parallel_region(x, dim=1, group=None, shapes=scatter_shapes)
         residual = x
         x = self.norm1(x)
         x = self.filter(x)
@@ -160,6 +173,8 @@ class Block(nn.Module):
         x = self.mlp(x)
         x = self.drop_path(x)
         x = x + residual
+        if not self.output_parallel:
+            x = gather_from_parallel_region(x, dim=1, shapes=scatter_shapes, group=None)
         return x
 
 class PrecipNet(nn.Module):
@@ -181,7 +196,7 @@ class PrecipNet(nn.Module):
         x = self.act(x)
         return x
 
-class AFNONet(nn.Module):
+class AFNONetDist(nn.Module):
     def __init__(
             self,
             params,
@@ -199,6 +214,7 @@ class AFNONet(nn.Module):
             hard_thresholding_fraction=1.0,
         ):
         super().__init__()
+        self.head_is_synced = False
         self.params = params
         self.img_size = img_size
         self.patch_size = (params.patch_size, params.patch_size)
@@ -221,7 +237,8 @@ class AFNONet(nn.Module):
 
         self.blocks = nn.ModuleList([
             Block(dim=embed_dim, mlp_ratio=mlp_ratio, drop=drop_rate, drop_path=dpr[i], norm_layer=norm_layer,
-            num_blocks=self.num_blocks, sparsity_threshold=sparsity_threshold, hard_thresholding_fraction=hard_thresholding_fraction) 
+            num_blocks=self.num_blocks, sparsity_threshold=sparsity_threshold, hard_thresholding_fraction=hard_thresholding_fraction,
+            input_parallel=True, output_parallel=True if i < depth-1 else False) 
         for i in range(depth)]) #NumBlocks = Diagonalmatrix von Attention
 
         self.norm = norm_layer(embed_dim)
@@ -247,7 +264,8 @@ class AFNONet(nn.Module):
     def forward_features(self, x):
         B = x.shape[0]
         x = self.patch_embed(x)
-        x = x + self.pos_embed # TODO: Print pos_embed
+        x = x + self.pos_embed # TODO: TEST Print pos_embed
+        if DEBUG: print("pose_embed",self.pos_embed)
         x = self.pos_drop(x)
         
         x = x.reshape(B, self.h, self.w, self.embed_dim)
@@ -257,7 +275,14 @@ class AFNONet(nn.Module):
         return x
 
     def forward(self, x):
+        x = copy_to_parallel_region(x, group=None)
         x = self.forward_features(x)
+        if not self.head_is_synced:
+            self.head_is_synced = True
+            for param in self.head.parameters():
+                dist.broadcast(
+                    param, 0, group=None
+                )
         x = self.head(x)
         x = rearrange(
             x,
@@ -287,7 +312,7 @@ class PatchEmbed(nn.Module):
 
 
 if __name__ == "__main__":
-    model = AFNONet(img_size=(720, 1440), patch_size=(4,4), in_chans=3, out_chans=10)
+    model = AFNONetDist(img_size=(720, 1440), patch_size=(4,4), in_chans=3, out_chans=10)
     sample = torch.randn(1, 3, 720, 1440)
     result = model(sample)
     print(result.shape)

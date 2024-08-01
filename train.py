@@ -43,7 +43,7 @@
 #Pedram Hassanzadeh - Rice University 
 #Karthik Kashinath - NVIDIA Corporation 
 #Animashree Anandkumar - California Institute of Technology, NVIDIA Corporation
-REPLICATE = True
+REPLICATE = False
 if REPLICATE:
     import random
     import numpy as np
@@ -76,6 +76,7 @@ logging_utils.config_logger()
 from utils.YParams import YParams
 from utils.data_loader_multifiles import get_data_loader
 from networks.afnonet import AFNONet, PrecipNet
+from networks.afnonet_mp_v1 import AFNONetDist
 from utils.img_utils import vis_precip
 import wandb
 from utils.weighted_acc_rmse import weighted_acc, weighted_rmse, weighted_rmse_torch, unlog_tp_torch
@@ -141,7 +142,9 @@ class Trainer():
       params['N_out_channels'] = len(params['out_channels'])
 
     if params.nettype == 'afno':
-      self.model = AFNONet(params).to(self.device) 
+      self.model = AFNONet(params).to(self.device)
+    elif params.nettype == 'afnodist':
+      self.model = AFNONetDist(params).to(self.device)
     else:
       raise Exception("not implemented")
      
@@ -161,7 +164,7 @@ class Trainer():
     if params.enable_amp == True:
       self.gscaler = amp.GradScaler()
 
-    if dist.is_initialized():
+    if dist.is_initialized() and params.nettype != 'afnodist':
       self.model = DistributedDataParallel(self.model,
                                            device_ids=[params.local_rank],
                                            output_device=[params.local_rank],find_unused_parameters=True)
