@@ -91,7 +91,7 @@ afno_backbone_finetune: &backbone_finetune
   max_epochs: 50
   pretrained: !!bool True
   two_step_training: !!bool True
-  pretrained_ckpt_path: '/hkfs/work/workspace/scratch/ie5012-MA/results/fcn_original/dataparallel/afno_backbone/0/training_checkpoints/best_ckpt.tar'
+  pretrained_ckpt_path: '/hkfs/work/workspace/scratch/ie5012-MA/results/fcn_original/data_parallel/afno_backbone/0/training_checkpoints/best_ckpt.tar'
 
 afno_model_parallel: 
   <<: *backbone_finetune
