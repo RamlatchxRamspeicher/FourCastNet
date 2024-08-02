@@ -86,8 +86,8 @@ from collections import OrderedDict
 import pickle
 DECORRELATION_TIME = 36 # 9 days
 import json
-from ruamel_yaml import YAML
-from ruamel_yaml.comments import CommentedMap as ruamelDict
+from ruamel.yaml import YAML
+from ruamel.yaml.comments import CommentedMap as ruamelDict
 
 class Trainer():
   def count_parameters(self):
