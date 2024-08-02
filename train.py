@@ -88,6 +88,7 @@ DECORRELATION_TIME = 36 # 9 days
 import json
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap as ruamelDict
+import perun
 
 class Trainer():
   def count_parameters(self):
@@ -202,7 +203,8 @@ class Trainer():
   def switch_off_grad(self, model):
     for param in model.parameters():
       param.requires_grad = False
-
+      
+  @perun.perun()
   def train(self):
     if self.params.log_to_screen:
       logging.info("Starting Training Loop...")
