@@ -41,11 +41,11 @@ class Mlp(nn.Module):
         self.fc2 = nn.Linear(hidden_features_local, out_features)
         self.drop = nn.Dropout(drop)
         self.gather_shapes = compute_split_shapes(
-                in_features, get_world_size()
+                in_features*get_world_size(), get_world_size()
             )
 
     def forward(self, x):
-        x = gather_from_parallel_region(x, dim=1, shapes=self.gather_shapes,group=None)
+        #x = gather_from_parallel_region(x, dim=1, shapes=self.gather_shapes,group=None)
         x = copy_to_parallel_region(x, group=None)
         x = self.fc1(x)
         x = self.act(x)
@@ -53,7 +53,7 @@ class Mlp(nn.Module):
         x = self.fc2(x)
         x = reduce_from_parallel_region(x, group=None)
         x = self.drop(x)
-        x = scatter_to_parallel_region(x, dim=1, group=None)
+        #x = scatter_to_parallel_region(x, dim=1, group=None)
         return x
 
 
@@ -66,7 +66,7 @@ class AFNO2D(nn.Module):
         self.hidden_size = hidden_size #768 
         self.sparsity_threshold = sparsity_threshold
         self.num_blocks = num_blocks #8
-        self.block_size = (self.hidden_size // self.num_blocks) //get_world_size() #96/world_size
+        self.block_size = (self.hidden_size // self.num_blocks)  #96/world_size
         self.hard_thresholding_fraction = hard_thresholding_fraction
         self.hidden_size_factor = hidden_size_factor
         self.scale = 0.02
@@ -147,6 +147,7 @@ class Block(nn.Module):
             output_parallel=False
         ):
         super().__init__()
+        dim = dim//get_world_size()
         self.input_parallel = input_parallel
         self.output_parallel = output_parallel
         self.norm1 = norm_layer(dim)
@@ -158,9 +159,11 @@ class Block(nn.Module):
         self.double_skip = double_skip
 
     def forward(self, x):
+        split_shapes = compute_split_shapes(x.shape[-1], get_world_size())
         if not self.input_parallel:
-            scatter_shapes = compute_split_shapes(x.shape[1], get_world_size())
-            x = scatter_to_parallel_region(x, dim=1, group=None, shapes=scatter_shapes)
+            print(x.shape)
+            x = scatter_to_parallel_region(x, dim=-1, group=None)
+            print(x.shape)
         residual = x
         x = self.norm1(x)
         x = self.filter(x)
@@ -174,7 +177,9 @@ class Block(nn.Module):
         x = self.drop_path(x)
         x = x + residual
         if not self.output_parallel:
-            x = gather_from_parallel_region(x, dim=1, shapes=scatter_shapes, group=None)
+            print(x.shape)
+            x = gather_from_parallel_region(x, dim=-1, shapes=None, group=None)
+            print(x.shape)
         return x
 
 class PrecipNet(nn.Module):
@@ -238,7 +243,7 @@ class AFNONetDist(nn.Module):
         self.blocks = nn.ModuleList([
             Block(dim=embed_dim, mlp_ratio=mlp_ratio, drop=drop_rate, drop_path=dpr[i], norm_layer=norm_layer,
             num_blocks=self.num_blocks, sparsity_threshold=sparsity_threshold, hard_thresholding_fraction=hard_thresholding_fraction,
-            input_parallel=True, output_parallel=True if i < depth-1 else False) 
+            input_parallel=False if i == 0 else True, output_parallel=True if i < depth-1 else False) 
         for i in range(depth)]) #NumBlocks = Diagonalmatrix von Attention
 
         self.norm = norm_layer(embed_dim)
