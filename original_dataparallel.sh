@@ -16,7 +16,7 @@ ml restore MA41
 
 BASE_DIR="/hkfs/work/workspace/scratch/ie5012-MA"
 config_file="${BASE_DIR}/FourCastNet/config/AFNO.yaml"
-config="afno_backbone_finetune" 
+config="afno_backbone" 
 run_num="0"
 
 export HDF5_USE_FILE_LOCKING=FALSE
@@ -33,7 +33,7 @@ export NCCL_NET_GDR_LEVEL=PHB
 TRAIN_FILE="$BASE_DIR/FourCastNet/train.py"
 DDP_VARS="$BASE_DIR/FourCastNet/export_DDP_vars.sh"
 
-source $BASE_DIR/.venvs/FourCastv2/bin/activate
+source $BASE_DIR/.venvs/Fourcastv2/bin/activate
 srun -u --mpi=pmix bash -c " 
   source $DDP_VARS
   python $TRAIN_FILE --enable_amp --yaml_config=$config_file --config=$config --run_num=$run_num"

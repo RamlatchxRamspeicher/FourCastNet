@@ -33,7 +33,7 @@ export NCCL_NET_GDR_LEVEL=PHB
 TRAIN_FILE="$BASE_DIR/FourCastNet/train.py"
 DDP_VARS="$BASE_DIR/FourCastNet/export_DDP_vars.sh"
 
-source $BASE_DIR/.venvs/FourCastv2/bin/activate
+source $BASE_DIR/.venvs/Fourcastv2/bin/activate
 srun -u --mpi=pmix bash -c " 
   source $DDP_VARS
   python $TRAIN_FILE --enable_amp --yaml_config=$config_file --config=$config --run_num=$run_num"
