@@ -70,7 +70,7 @@ afno_backbone: &backbone
   out_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
   orography: !!bool False
   orography_path: None 
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/fcn_original/dataparallel'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/fcn_original/data_parallel'
   train_data_path: '/hkfs/work/workspace/scratch/ie5012-MA/data/train'
   valid_data_path: '/hkfs/work/workspace/scratch/ie5012-MA/data/test'
   inf_data_path:   '/hkfs/work/workspace/scratch/ie5012-MA/data/out_of_sample'
@@ -94,6 +94,13 @@ afno_backbone_finetune: &backbone_finetune
   pretrained_ckpt_path: '/hkfs/work/workspace/scratch/ie5012-MA/results/fcn_original/data_parallel/afno_backbone/0/training_checkpoints/best_ckpt.tar'
 
 afno_model_parallel: 
+  <<: *backbone
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/fcn_original/model_parallel'
+  pretrained_ckpt_path: '/hkfs/work/workspace/scratch/ie5012-MA/results/fcn_original/model_parallel/afno_backbone/0/training_checkpoints/best_ckpt.tar'
+  batch_size: 2
+  nettype: 'afnodist'
+
+afno_model_parallel_finetune: 
   <<: *backbone_finetune
   exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/fcn_original/model_parallel'
   pretrained_ckpt_path: '/hkfs/work/workspace/scratch/ie5012-MA/results/fcn_original/model_parallel/afno_backbone/0/training_checkpoints/best_ckpt.tar'
