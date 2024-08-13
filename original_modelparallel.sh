@@ -16,7 +16,7 @@ ml purge
 ml restore MA41
 
 BASE_DIR="/hkfs/work/workspace/scratch/ie5012-MA"
-config_file="${BASE_DIR}/FourCastNet/config/AFNO.yaml"
+config_file="${BASE_DIR}/FourCastNet/config/AFNODIST.yaml"
 config="afno_backbone_finetune" 
 run_num="0"
 
