@@ -86,8 +86,8 @@ from collections import OrderedDict
 import pickle
 DECORRELATION_TIME = 36 # 9 days
 import json
-# from ruamel.yaml import YAML
-# from ruamel.yaml.comments import CommentedMap as ruamelDict
+from ruamel.yaml import YAML
+from ruamel.yaml.comments import CommentedMap as ruamelDict
 # import perun
 
 class Trainer():
@@ -204,7 +204,7 @@ class Trainer():
     for param in model.parameters():
       param.requires_grad = False
 
-  # @perun.perun()
+  @perun.perun()
   def train(self):
     if self.params.log_to_screen:
       logging.info("Starting Training Loop...")
@@ -563,7 +563,7 @@ if __name__ == '__main__':
 
   world_rank = get_world_rank()
   local_rank = get_local_rank()
-  if params['world_size'] > 1:
+  if params['world_size'] > 1 and params['nettype'] != 'afnodist':
     # dist.init_process_group(backend='nccl',
     #                         init_method='env://')
     # local_rank = int(os.environ["LOCAL_RANK"])
@@ -572,6 +572,7 @@ if __name__ == '__main__':
     params['global_batch_size'] = params.batch_size
     params['batch_size'] = int(params.batch_size//params['world_size'])
 
+  #print(params.batch_size)
   torch.cuda.set_device(local_rank)
   torch.backends.cudnn.benchmark = True
 
@@ -617,13 +618,13 @@ if __name__ == '__main__':
 
   params['N_out_channels'] = len(params['out_channels'])
 
-  # if world_rank == 0:
-  #   hparams = ruamelDict()
-  #   yaml = YAML()
-  #   for key, value in params.params.items():
-  #     hparams[str(key)] = str(value)
-  #   with open(os.path.join(expDir, 'hyperparams.yaml'), 'w') as hpfile:
-  #     yaml.dump(hparams,  hpfile )
+  if world_rank == 0:
+    hparams = ruamelDict()
+    yaml = YAML()
+    for key, value in params.params.items():
+      hparams[str(key)] = str(value)
+    with open(os.path.join(expDir, 'hyperparams.yaml'), 'w') as hpfile:
+      yaml.dump(hparams,  hpfile )
 
   trainer = Trainer(params, world_rank)
   trainer.train()
