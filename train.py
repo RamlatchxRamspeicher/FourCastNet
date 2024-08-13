@@ -88,7 +88,7 @@ DECORRELATION_TIME = 36 # 9 days
 import json
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap as ruamelDict
-# import perun
+import perun
 
 class Trainer():
   def count_parameters(self):
