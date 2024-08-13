@@ -6,22 +6,24 @@
 #SBATCH --ntasks-per-node=4
 
 #SBATCH -J FCN_MP
-#SBATCH --output="/hkfs/work/workspace/scratch/ie5012-MA/results/010824/fcn_mp_net.out"
+#SBATCH --output="/hkfs/work/workspace/scratch/ie5012-MA/results/110824/fcn_mp_net_finetune.out"
 #SBATCH -p accelerated
 #SBATCH --mem=501600mb
 #SBATCH --exclusive
+#SBATCH --mail-type=ALL
 
 ml purge
 ml restore MA41
 
 BASE_DIR="/hkfs/work/workspace/scratch/ie5012-MA"
 config_file="${BASE_DIR}/FourCastNet/config/AFNO.yaml"
-config="afno_model_parallel" 
+config="afno_backbone_finetune" 
 run_num="0"
 
 export HDF5_USE_FILE_LOCKING=FALSE
 export NCCL_NET_GDR_LEVEL=PHB
-
+export WANDB_MODE=offline
+export WANDB_START_METHOD="thread"
 # SRUN_PARAMS=(
 #   --mpi="pmi2"
 #   --gpus-per-task=1
