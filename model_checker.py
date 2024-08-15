@@ -3,7 +3,7 @@ import os
 import torch
 from utils.YParams import YParams
 from networks.afnonet_mp_v1 import AFNONetDist
-def check_model_parameters(checkpoint_path):
+def check_model_parameters(checkpoint_path,params):
     # Load the model checkpoint
     model = AFNONetDist(
         params,
