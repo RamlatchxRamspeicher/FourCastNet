@@ -35,5 +35,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     params = YParams(os.path.abspath(args.yaml_config), args.config)
     checkpoint_path = os.path.abspath(args.ckpt)
+    params['N_in_channels'] = len(params['in_channels'])
+    params['N_out_channels'] = len(params['out_channels'])
     # Check the model parameters
     check_model_parameters(checkpoint_path,params)
