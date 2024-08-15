@@ -1,7 +1,7 @@
 import argparse
 import os
 import torch
-from FourCastNet.utils.YParams import YParams
+from utils.YParams import YParams
 from networks.afnonet_mp_v1 import AFNONetDist
 def check_model_parameters(checkpoint_path):
     # Load the model checkpoint
