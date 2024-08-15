@@ -146,6 +146,45 @@ class Trainer():
       self.model = AFNONet(params).to(self.device)
     elif params.nettype == 'afnodist':
       self.model = AFNONetDist(params).to(self.device)
+    elif params.nettype == 'afnodist_mp':
+      from torch.distributed.tensor.parallel import ColwiseParallel, RowwiseParallel, parallelize_module,PrepareModuleInput,SequenceParallel
+      from torch.distributed.device_mesh import init_device_mesh
+      from torch.distributed._tensor import Replicate, Shard
+      tp_mesh = init_device_mesh("cuda", (params.world_size,))
+
+      self.model = parallelize_module(AFNONet(params).to(self.device),
+                                tp_mesh,
+                                {
+                                    "patch_embed": RowwiseParallel(
+                                       input_layouts=Replicate(),
+                                       output_layouts=Shard(1),
+                                    ),
+                                    "pose_embed": RowwiseParallel(),
+                                    "norm": SequenceParallel(),
+                                    "head": ColwiseParallel(
+                                       input_layouts=Shard(1),
+                                       output_layouts=Replicate()
+                                    ),
+                                })
+      for layer_id, block in enumerate(self.model.blocks):
+          layer_tp_plan = {
+              "norm1": SequenceParallel(),
+              "filter": PrepareModuleInput(
+                 input_layouts=(Shard(1),),
+                 desired_input_layouts=(Replicate(),),
+              ),
+              "filter.w1": ColwiseParallel(),
+              "filter.w2": RowwiseParallel(output_layouts=Shard(1)),
+              "norm2": SequenceParallel(),
+              "mlp": PrepareModuleInput(
+                 input_layouts=(Shard(1),),
+                 desired_input_layouts=(Replicate(),),
+              ),
+              "mlp.fc1": ColwiseParallel(),
+              "mlp.fc2": RowwiseParallel(output_layouts=Shard(1)),
+          }
+          #TODO: do stuff here to use local size in block with x//tp_mesh.size()
+          parallelize_module(block, tp_mesh, layer_tp_plan)
     else:
       raise Exception("not implemented")
      
