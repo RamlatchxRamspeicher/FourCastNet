@@ -67,7 +67,8 @@ import re
 import torchvision
 from torchvision.utils import save_image
 import torch.nn as nn
-import torch.cuda.amp as amp
+import torch.amp as amp
+# import torch.cuda.amp as amp
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
 import logging
@@ -77,6 +78,7 @@ from utils.YParams import YParams
 from utils.data_loader_multifiles import get_data_loader
 from networks.afnonet import AFNONet, PrecipNet
 from networks.afnonet_mp_v1 import AFNONetDist
+from networks.afnonet_mp_dp import AFNONetMPDP
 from utils.img_utils import vis_precip
 import wandb
 from utils.weighted_acc_rmse import weighted_acc, weighted_rmse, weighted_rmse_torch, unlog_tp_torch
@@ -104,7 +106,7 @@ class Trainer():
       wandb.init(config=params, name=params.name, group=params.group, project=params.project, entity=params.entity)
 
     logging.info('rank %d, begin data loader init'%world_rank)
-    self.train_data_loader, self.train_dataset, self.train_sampler = get_data_loader(params, params.train_data_path, dist.is_initialized(), train=True)
+    self.train_data_loader, self.train_dataset, self.train_sampler = get_data_loader(params, params.train_data_path, dist.is_initialized(), train=True, rank=world_rank-world_rank%params.mp_size, world_size=get_world_size()//params.mp_size)
     self.valid_data_loader, self.valid_dataset = get_data_loader(params, params.valid_data_path, dist.is_initialized(), train=False)
     self.loss_obj = LpLoss()
     logging.info('rank %d, data loader initialized'%world_rank)
@@ -155,14 +157,14 @@ class Trainer():
       self.model = parallelize_module(AFNONet(params).to(self.device),
                                 tp_mesh,
                                 {
-                                    "patch_embed": RowwiseParallel(
-                                       input_layouts=Replicate(),
-                                       output_layouts=Shard(1),
-                                    ),
-                                    "pose_embed": RowwiseParallel(),
+                                    # "patch_embed": RowwiseParallel(
+                                    #    input_layouts=Replicate(),
+                                    #    output_layouts=Shard(1),
+                                    # ),
+                                    # "pose_embed": RowwiseParallel(),
                                     "norm": SequenceParallel(),
                                     "head": ColwiseParallel(
-                                       input_layouts=Shard(1),
+                                       input_layouts=Shard(3),
                                        output_layouts=Replicate()
                                     ),
                                 })
@@ -170,21 +172,23 @@ class Trainer():
           layer_tp_plan = {
               "norm1": SequenceParallel(),
               "filter": PrepareModuleInput(
-                 input_layouts=(Shard(1),),
+                 input_layouts=(Shard(3),),
                  desired_input_layouts=(Replicate(),),
               ),
               "filter.w1": ColwiseParallel(),
-              "filter.w2": RowwiseParallel(output_layouts=Shard(1)),
+              "filter.w2": RowwiseParallel(output_layouts=Shard(3)),
               "norm2": SequenceParallel(),
               "mlp": PrepareModuleInput(
-                 input_layouts=(Shard(1),),
+                 input_layouts=(Shard(3),),
                  desired_input_layouts=(Replicate(),),
               ),
               "mlp.fc1": ColwiseParallel(),
-              "mlp.fc2": RowwiseParallel(output_layouts=Shard(1)),
+              "mlp.fc2": RowwiseParallel(output_layouts=Shard(3)),
           }
           #TODO: do stuff here to use local size in block with x//tp_mesh.size()
           parallelize_module(block, tp_mesh, layer_tp_plan)
+    elif params.nettype == 'afnodist_mp_dp':
+      self.model = AFNONetMPDP(params).to(self.device)
     else:
       raise Exception("not implemented")
      
@@ -202,9 +206,9 @@ class Trainer():
     self.optimizer = torch.optim.Adam(self.model.parameters(), lr = params.lr)
 
     if params.enable_amp == True:
-      self.gscaler = amp.GradScaler()
+      self.gscaler = amp.GradScaler("cuda")
 
-    if dist.is_initialized() and params.nettype != 'afnodist':
+    if dist.is_initialized() and params.nettype not in ['afnodist',"afnodist_mp","afnodist_mp_dp"]:
       self.model = DistributedDataParallel(self.model,
                                            device_ids=[params.local_rank],
                                            output_device=[params.local_rank],find_unused_parameters=True)
@@ -243,7 +247,7 @@ class Trainer():
     for param in model.parameters():
       param.requires_grad = False
 
-  @perun.perun()
+  # @perun.perun()
   def train(self):
     if self.params.log_to_screen:
       logging.info("Starting Training Loop...")
@@ -321,7 +325,7 @@ class Trainer():
 
       self.model.zero_grad()
       if self.params.two_step_training:
-          with amp.autocast(self.params.enable_amp):
+          with amp.autocast("cuda",enabled=self.params.enable_amp):
             gen_step_one = self.model(inp).to(self.device, dtype = torch.float)
             loss_step_one = self.loss_obj(gen_step_one, tar[:,0:self.params.N_out_channels])
             if self.params.orography:
@@ -331,7 +335,7 @@ class Trainer():
             loss_step_two = self.loss_obj(gen_step_two, tar[:,self.params.N_out_channels:2*self.params.N_out_channels])
             loss = loss_step_one + loss_step_two
       else:
-          with amp.autocast(self.params.enable_amp):
+          with amp.autocast("cuda",enabled=self.params.enable_amp):
             if self.precip: # use a wind model to predict 17(+n) channels at t+dt
               with torch.no_grad():
                 inp = self.model_wind(inp).to(self.device, dtype = torch.float)
@@ -602,7 +606,7 @@ if __name__ == '__main__':
 
   world_rank = get_world_rank()
   local_rank = get_local_rank()
-  if params['world_size'] > 1 and params['nettype'] != 'afnodist':
+  if params['world_size'] > 1 and params['nettype'] not in ['afnodist',"afnodist_mp"]:
     # dist.init_process_group(backend='nccl',
     #                         init_method='env://')
     # local_rank = int(os.environ["LOCAL_RANK"])
@@ -664,7 +668,7 @@ if __name__ == '__main__':
       hparams[str(key)] = str(value)
     with open(os.path.join(expDir, 'hyperparams.yaml'), 'w') as hpfile:
       yaml.dump(hparams,  hpfile )
-
+  mp_size = params['mp_size']
   trainer = Trainer(params, world_rank)
   trainer.train()
   logging.info('DONE ---- rank %d'%world_rank)
