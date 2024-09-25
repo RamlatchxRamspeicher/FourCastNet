@@ -208,7 +208,7 @@ class Trainer():
     if params.enable_amp == True:
       self.gscaler = amp.GradScaler("cuda")
 
-    if dist.is_initialized() and params.nettype not in ['afnodist',"afnodist_mp","afnodist_mp_dp"]:
+    if dist.is_initialized() and (params.nettype not in ['afnodist',"afnodist_mp","afnodist_mp_dp"] or params.mp_size == 1):
       self.model = DistributedDataParallel(self.model,
                                            device_ids=[params.local_rank],
                                            output_device=[params.local_rank],find_unused_parameters=True)
