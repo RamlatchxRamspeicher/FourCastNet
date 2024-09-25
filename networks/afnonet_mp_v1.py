@@ -82,10 +82,10 @@ class AFNO2D(nn.Module):
 
         dtype = x.dtype
         x = x.float()
-        B, H, W, C = x.shape #64, 720, 1440, 768 = 64*720*1440*768 = 50960793600
+        B, H, W, C = x.shape #2, 720, 1440, 768 = 2*720*1440*768 = 50960793600
 
         x = torch.fft.rfft2(x, dim=(1, 2), norm="ortho")
-        x = x.reshape(B, H, W // 2 + 1, self.num_blocks, self.block_size) #64, 720, 721, 8, 96/world_size = 64*720*721*8*96/world_size = 25515786240
+        x = x.reshape(B, H, W // 2 + 1, self.num_blocks, self.block_size) #2, 720, 721, 8, 96/world_size = 2*720*721*8*96/world_size = 25515786240
 
         o1_real = torch.zeros([B, H, W // 2 + 1, self.num_blocks, self.block_size * self.hidden_size_factor], device=x.device)
         o1_imag = torch.zeros([B, H, W // 2 + 1, self.num_blocks, self.block_size * self.hidden_size_factor], device=x.device)
@@ -100,31 +100,31 @@ class AFNO2D(nn.Module):
             torch.einsum('...bi,bio->...bo', x[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes].real, self.w1[0]) - \
             torch.einsum('...bi,bio->...bo', x[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes].imag, self.w1[1]) + \
             self.b1[0]
-        ) #64, 720, 721, 8, 96/world_size x 8, 96/world_size, 768 = 64, 720, 721, 8, 768
+        ) #2, 720, 721, 8, 96/world_size x 8, 96/world_size, 768 = 2, 720, 721, 8, 768
 
         o1_imag[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes] = F.relu(
             torch.einsum('...bi,bio->...bo', x[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes].imag, self.w1[0]) + \
             torch.einsum('...bi,bio->...bo', x[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes].real, self.w1[1]) + \
             self.b1[1]
-        ) #64, 720, 721, 8, 96/world_size x 8, 96/world_size, 768 = 64, 720, 721, 8, 768
+        ) #2, 720, 721, 8, 96/world_size x 8, 96/world_size, 768 = 2, 720, 721, 8, 768
 
         o2_real[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes]  = (
             torch.einsum('...bi,bio->...bo', o1_real[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes], self.w2[0]) - \
             torch.einsum('...bi,bio->...bo', o1_imag[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes], self.w2[1]) + \
             self.b2[0]
-        ) #64, 720, 721, 8, 768 x 8, 768, 96/world_size = 64, 720, 721, 8, 96/world_size
+        ) #2, 720, 721, 8, 768 x 8, 768, 96/world_size = 2, 720, 721, 8, 96/world_size
 
         o2_imag[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes]  = (
             torch.einsum('...bi,bio->...bo', o1_imag[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes], self.w2[0]) + \
             torch.einsum('...bi,bio->...bo', o1_real[:, total_modes-kept_modes:total_modes+kept_modes, :kept_modes], self.w2[1]) + \
             self.b2[1]
-        ) #64, 720, 721, 8, 768 x 8, 768, 96/world_size = 64, 720, 721, 8, 96/world_size
+        ) #2, 720, 721, 8, 768 x 8, 768, 96/world_size = 2, 720, 721, 8, 96/world_size
 
-        x = torch.stack([o2_real, o2_imag], dim=-1) #64, 720, 721, 8, 96/world_size, 2
+        x = torch.stack([o2_real, o2_imag], dim=-1) #2, 720, 721, 8, 96/world_size, 2
         x = F.softshrink(x, lambd=self.sparsity_threshold)
-        x = torch.view_as_complex(x) #64, 720, 721, 8, 96/world_size
-        x = x.reshape(B, H, W // 2 + 1, C) # 64, 720, 721, 768
-        x = torch.fft.irfft2(x, s=(H, W), dim=(1,2), norm="ortho") #64, 720, 1440, 768
+        x = torch.view_as_complex(x) #2, 720, 721, 8, 96/world_size
+        x = x.reshape(B, H, W // 2 + 1, C) # 2, 720, 721, 768
+        x = torch.fft.irfft2(x, s=(H, W), dim=(1,2), norm="ortho") #2, 720, 1440, 768
         x = x.type(dtype)
 
         return x + bias
