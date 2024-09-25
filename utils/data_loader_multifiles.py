@@ -58,13 +58,13 @@ import math
 from utils.img_utils import reshape_fields, reshape_precip
 
 
-def get_data_loader(params, files_pattern, distributed, train):
+def get_data_loader(params, files_pattern, distributed, train, rank=None, world_size=None):
 
   dataset = GetDataset(params, files_pattern, train)
-  sampler = DistributedSampler(dataset, shuffle=train) if distributed else None
+  sampler = DistributedSampler(dataset,num_replicas=world_size, rank=rank, shuffle=train) if distributed else None
   
   dataloader = DataLoader(dataset,
-                          batch_size=int(params.batch_size),
+                          batch_size=int(params.batch_size)//params.mp_size if distributed else int(params.batch_size),
                           num_workers=params.num_data_workers,
                           shuffle=False, #(sampler is None),
                           sampler=sampler if train else None,
