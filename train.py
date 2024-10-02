@@ -106,7 +106,7 @@ class Trainer():
       wandb.init(config=params, name=params.name, group=params.group, project=params.project, entity=params.entity)
 
     logging.info('rank %d, begin data loader init'%world_rank)
-    self.train_data_loader, self.train_dataset, self.train_sampler = get_data_loader(params, params.train_data_path, dist.is_initialized(), train=True, rank=world_rank-world_rank%params.mp_size, world_size=get_world_size()//params.mp_size)
+    self.train_data_loader, self.train_dataset, self.train_sampler = get_data_loader(params, params.train_data_path, dist.is_initialized(), train=True, rank=world_rank-world_rank%params.mp_size if params.mp_size >1 else None, world_size=get_world_size()//params.mp_size)  ### Edited by Robin Maurer
     self.valid_data_loader, self.valid_dataset = get_data_loader(params, params.valid_data_path, dist.is_initialized(), train=False)
     self.loss_obj = LpLoss()
     logging.info('rank %d, data loader initialized'%world_rank)
@@ -146,15 +146,15 @@ class Trainer():
 
     if params.nettype == 'afno':
       self.model = AFNONet(params).to(self.device)
-    elif params.nettype == 'afnodist':
-      self.model = AFNONetDist(params).to(self.device)
-    elif params.nettype == 'afnodist_mp':
-      from torch.distributed.tensor.parallel import ColwiseParallel, RowwiseParallel, parallelize_module,PrepareModuleInput,SequenceParallel
-      from torch.distributed.device_mesh import init_device_mesh
-      from torch.distributed._tensor import Replicate, Shard
-      tp_mesh = init_device_mesh("cuda", (params.world_size,))
+    elif params.nettype == 'afnodist':  ### Added by Robin Maurer
+      self.model = AFNONetDist(params).to(self.device)  ### Added by Robin Maurer
+    elif params.nettype == 'afnodist_mp':  ### Added by Robin Maurer
+      from torch.distributed.tensor.parallel import ColwiseParallel, RowwiseParallel, parallelize_module,PrepareModuleInput,SequenceParallel  ### Added by Robin Maurer
+      from torch.distributed.device_mesh import init_device_mesh  ### Added by Robin Maurer
+      from torch.distributed._tensor import Replicate, Shard  ### Added by Robin Maurer
+      tp_mesh = init_device_mesh("cuda", (params.world_size,))  ### Added by Robin Maurer
 
-      self.model = parallelize_module(AFNONet(params).to(self.device),
+      self.model = parallelize_module(AFNONet(params).to(self.device),  ### Added by Robin Maurer
                                 tp_mesh,
                                 {
                                     # "patch_embed": RowwiseParallel(
@@ -168,8 +168,8 @@ class Trainer():
                                        output_layouts=Replicate()
                                     ),
                                 })
-      for layer_id, block in enumerate(self.model.blocks):
-          layer_tp_plan = {
+      for layer_id, block in enumerate(self.model.blocks):  ### Added by Robin Maurer
+          layer_tp_plan = {  ### Added by Robin Maurer
               "norm1": SequenceParallel(),
               "filter": PrepareModuleInput(
                  input_layouts=(Shard(3),),
@@ -186,9 +186,9 @@ class Trainer():
               "mlp.fc2": RowwiseParallel(output_layouts=Shard(3)),
           }
           #TODO: do stuff here to use local size in block with x//tp_mesh.size()
-          parallelize_module(block, tp_mesh, layer_tp_plan)
-    elif params.nettype == 'afnodist_mp_dp':
-      self.model = AFNONetMPDP(params).to(self.device)
+          parallelize_module(block, tp_mesh, layer_tp_plan)  ### Added by Robin Maurer
+    elif params.nettype == 'afnodist_mp_dp':  ### Added by Robin Maurer
+      self.model = AFNONetMPDP(params).to(self.device)  ### Added by Robin Maurer
     else:
       raise Exception("not implemented")
      
@@ -208,7 +208,7 @@ class Trainer():
     if params.enable_amp == True:
       self.gscaler = amp.GradScaler("cuda")
 
-    if dist.is_initialized() and (params.nettype not in ['afnodist',"afnodist_mp","afnodist_mp_dp"] or params.mp_size == 1):
+    if dist.is_initialized() and (params.nettype not in ['afnodist',"afnodist_mp","afnodist_mp_dp"] or params.mp_size == 1):  ### Edited by Robin Maurer
       self.model = DistributedDataParallel(self.model,
                                            device_ids=[params.local_rank],
                                            output_device=[params.local_rank],find_unused_parameters=True)
@@ -258,8 +258,11 @@ class Trainer():
         self.train_sampler.set_epoch(epoch)
 #        self.valid_sampler.set_epoch(epoch)
 
+      dist.barrier() if dist.is_initialized() else None  ### Added by Robin Maurer
       start = time.time()
       tr_time, data_time, train_logs = self.train_one_epoch()
+      dist.barrier() if dist.is_initialized() else None  ### Added by Robin Maurer
+
       valid_time, valid_logs = self.validate_one_epoch()
       if epoch==self.params.max_epochs-1 and self.params.prediction_type == 'direct':
         valid_weighted_rmse = self.validate_final()
@@ -598,22 +601,22 @@ if __name__ == '__main__':
 
   params = YParams(os.path.abspath(args.yaml_config), args.config)
   params['epsilon_factor'] = args.epsilon_factor
-  from utils.comm import init, get_local_rank, get_world_rank, get_world_size
-  init("nccl-slurm")
-  params['world_size'] = get_world_size()
-  # if 'WORLD_SIZE' in os.environ:
-    # params['world_size'] = int(os.environ['WORLD_SIZE'])
+  from utils.comm import init, get_local_rank, get_world_rank, get_world_size  ### Added by Robin Maurer
+  init("nccl-slurm")  ### Added by Robin Maurer
+  params['world_size'] = get_world_size()  ### Added by Robin Maurer
+  # if 'WORLD_SIZE' in os.environ:    ### Edited by Robin Maurer
+    # params['world_size'] = int(os.environ['WORLD_SIZE'])  ### Edited by Robin Maurer
 
-  world_rank = get_world_rank()
-  local_rank = get_local_rank()
-  if params['world_size'] > 1 and params['nettype'] not in ['afnodist',"afnodist_mp"]:
-    # dist.init_process_group(backend='nccl',
-    #                         init_method='env://')
-    # local_rank = int(os.environ["LOCAL_RANK"])
+  world_rank = get_world_rank()  ### Added by Robin Maurer
+  local_rank = get_local_rank()  ### Added by Robin Maurer
+  if params['world_size'] > 1 and params['nettype'] not in ['afnodist',"afnodist_mp"]:  ### Edited by Robin Maurer
+    # dist.init_process_group(backend='nccl',         ### Edited by Robin Maurer
+    #                         init_method='env://')   ### Edited by Robin Maurer
+    # local_rank = int(os.environ["LOCAL_RANK"])    ### Edited by Robin Maurer
     args.gpu = local_rank
-    # world_rank = dist.get_rank()
+    # world_rank = dist.get_rank()                  ### Edited by Robin Maurer
     params['global_batch_size'] = params.batch_size
-    params['batch_size'] = int(params.batch_size//params['world_size'])
+    params['batch_size'] = int(params.batch_size//params['world_size'])  
 
   #print(params.batch_size)
   torch.cuda.set_device(local_rank)
@@ -668,7 +671,8 @@ if __name__ == '__main__':
       hparams[str(key)] = str(value)
     with open(os.path.join(expDir, 'hyperparams.yaml'), 'w') as hpfile:
       yaml.dump(hparams,  hpfile )
-  mp_size = params['mp_size']
+  mp_size = params['mp_size']  ### Added by Robin Maurer
+  print(world_rank)
   trainer = Trainer(params, world_rank)
   trainer.train()
   logging.info('DONE ---- rank %d'%world_rank)
