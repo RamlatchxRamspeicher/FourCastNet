@@ -5,8 +5,8 @@
 #SBATCH --nodes=16
 #SBATCH --ntasks-per-node=4
 
-#SBATCH -J 1MP
-#SBATCH --output="/hkfs/work/workspace/scratch/ie5012-MA/results/241008/fcn_mpdp_1.out"
+#SBATCH -J 4MP
+#SBATCH --output="/hkfs/work/workspace/scratch/ie5012-MA/results/241008/fcn_mpdp_4.out"
 #SBATCH -p accelerated
 #SBATCH --mem=501600mb
 #SBATCH --mail-type=ALL
@@ -15,7 +15,7 @@ ml purge
 ml restore MA41
 
 BASE_DIR="/hkfs/work/workspace/scratch/ie5012-MA"
-config_file="${BASE_DIR}/FourCastNet/config/AFNOMUDP1.yaml"
+config_file="${BASE_DIR}/FourCastNet/config/AFNOMUDP4.yaml"
 config="afno_backbone" 
 run_num="0"
 

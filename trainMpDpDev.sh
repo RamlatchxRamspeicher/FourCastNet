@@ -1,22 +1,22 @@
 #!/usr/bin/env bash 
 
-#SBATCH --time=48:00:00
+#SBATCH --time=04:00:00
 #SBATCH --gres=gpu:4
-#SBATCH --nodes=16
+#SBATCH --nodes=2
 #SBATCH --ntasks-per-node=4
 
-#SBATCH -J 1MP
-#SBATCH --output="/hkfs/work/workspace/scratch/ie5012-MA/results/241008/fcn_mpdp_1.out"
+#SBATCH -J DevOrig
+#SBATCH --output="/hkfs/work/workspace/scratch/ie5012-MA/.spike/results/021024/fcn_mpdp_test_4.out"
 #SBATCH -p accelerated
 #SBATCH --mem=501600mb
-#SBATCH --mail-type=ALL
+#SBATCH --mail-type=NONE
 
 ml purge
 ml restore MA41
 
 BASE_DIR="/hkfs/work/workspace/scratch/ie5012-MA"
-config_file="${BASE_DIR}/FourCastNet/config/AFNOMUDP1.yaml"
-config="afno_backbone" 
+config_file="${BASE_DIR}/FourCastNet/config/AFNOMUDP_Devel.yaml"
+config="afno_backbone_four" 
 run_num="0"
 
 export HDF5_USE_FILE_LOCKING=FALSE
