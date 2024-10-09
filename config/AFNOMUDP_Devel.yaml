@@ -72,8 +72,8 @@ afno_backbone: &backbone
   orography: !!bool False
   orography_path: None 
   exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/final/1'
-  train_data_path: '/hkfs/work/workspace/scratch/ie5012-MA/data/train'
-  valid_data_path: '/hkfs/work/workspace/scratch/ie5012-MA/data/test'
+  train_data_path: '/hkfs/work/workspace/scratch/ie5012-MA/data/wip/train'
+  valid_data_path: '/hkfs/work/workspace/scratch/ie5012-MA/data/wip/test'
   inf_data_path:   '/hkfs/work/workspace/scratch/ie5012-MA/data/out_of_sample'
   time_means_path:   '/hkfs/work/workspace/scratch/ie5012-MA/data/stats/time_means.npy'
   global_means_path: '/hkfs/work/workspace/scratch/ie5012-MA/data/stats/global_means.npy'
@@ -90,21 +90,21 @@ afno_backbone_two: &backbone_two
   <<: *backbone
   mp_size: 2
   exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/.spike/develop/results/2'
-  batch_size: 32
+  batch_size: 8
   max_epochs: 10
 
 afno_backbone_four: &backbone_four
   <<: *backbone
   mp_size: 4
   exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/.spike/develop/results/4'
-  batch_size: 4
+  batch_size: 8
   max_epochs: 10
 
 afno_backbone_eight: &backbone_eight
   <<: *backbone
   mp_size: 8
   exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/.spike/develop/results/8'
-  batch_size: 2
+  batch_size: 8
   max_epochs: 10
 
 afno_backbone_orography: &backbone_orography 
