@@ -357,6 +357,8 @@ class Trainer():
       if self.params.enable_amp:
         self.gscaler.update()
 
+      if dist.get_rank() == 0: print("batch: ", i, "loss: ", loss.item(), "time taken: ", time.time()-tr_start)
+
       tr_time += time.time() - tr_start
     
     try:

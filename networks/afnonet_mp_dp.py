@@ -36,6 +36,7 @@ def create_mp_comm_group(mp_size):
     # if rank % mp_size == 0:
     #     comm_group = comm.group.Incl([i for i in range(rank, rank+mp_size)])
     comm_group = comm.group.Incl([i for i in range(rank-rank%mp_size, rank-rank%mp_size+mp_size)])
+    # print(f"Rank {rank} in group {comm_group.handle} has group size {comm_group.Get_size()} and group rank {comm_group.Get_rank()}")
     return comm.Create_group(comm_group)
 
 # def get_mp_comm_group():
@@ -46,30 +47,74 @@ class ScatterGather(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input, mp_size, rank, mp_group:MPI.Intracomm=None):
         ctx.save_for_backward(input)
+        ctx.mp_size = mp_size
+        ctx.rank = rank
+        ctx.mp_group = mp_group
         if mp_size == 1:
             return input
-        return mp_group.scatter(input, rank - rank % mp_size)
+        # print("len input forward:",len(input),"shape input forward:",input.shape)
+        # scatter input along dim=3 to all ranks in group
+        split_tensors = torch.chunk(input, mp_size, dim=3)
+        input = mp_group.scatter(split_tensors, root=0)
+        mp_group.barrier()
+        # print("len scatter forward:",len(input),"shape scatter forward rank:",input[rank%mp_size].shape)
+        return input
+        # return mp_group.scatter(input, rank - rank % mp_size)
     @staticmethod
-    def backward(ctx, grad_output, mp_size, rank, mp_group:MPI.Intracomm=None):
+    def backward(ctx, grad_output):
         input, = ctx.saved_tensors
-        if mp_size == 1:
-            return grad_output
-        return mp_group.gather(grad_output, rank - rank % mp_size)
+        if ctx.mp_size == 1:
+            return grad_output, None, None, None
+        device = input.device
+        grad_output =  ctx.mp_group.allgather(grad_output)
+        ctx.mp_group.barrier()
+        grad_output = [t.to(device) for t in grad_output]
+        # if grad_output is not None:
+        #     print("len scatter backward:",len(grad_output),"shape scatter backward rank:", ctx.rank, ["tensor: " + str(i) + " device: " + str(grad_output[i].get_device()) for i in range(len(grad_output))])
+        grad_output = torch.cat(grad_output, dim=3) if grad_output is not None else grad_output
+        # print("len scatter backward:",len(grad_output),"shape scatter backward rank:",grad_output.shape)
+
+        return grad_output, None, None, None
+        # return ctx.mp_group.gather(grad_output, ctx.rank - ctx.rank % ctx.mp_size), None, None, None
     
 class GatherScatter(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input, mp_size, rank, mp_group:MPI.Intracomm=None):
         ctx.save_for_backward(input)
+        ctx.mp_size = mp_size
+        ctx.rank = rank
+        ctx.mp_group = mp_group
         if mp_size == 1:
             return input
-        return mp_group.gather(input, rank - rank % mp_size)
+        device = input.device
+        # print("device gather input forward:",device, "rank:",rank)
+        # print("len  gather input forward:",len(input),"shape gather input forward:",input.shape)
+        gathered_tensor = mp_group.allgather(input)
+        mp_group.barrier()
+        # if gathered_tensor is not None:
+        #     print("len gather forward:",len(gathered_tensor),"shape gather forward rank:", ctx.rank, ["tensor: " + str(i) + " device: " + str(gathered_tensor[i].get_device()) for i in range(len(gathered_tensor))])
+        gathered_tensor = [t.to(device) for t in gathered_tensor]
+        # for t in gathered_tensor:
+        #     t = t.to(device)
+        input = torch.cat(gathered_tensor, dim=3) if gathered_tensor is not None else gathered_tensor
+        # print("len gather forward:",len(input),"shape gather forward rank:",input[rank%mp_size].shape)
+
+        return input
+        # return mp_group.gather(input, rank - rank % mp_size)
         
     @staticmethod
-    def backward(ctx, grad_output, mp_size, rank, mp_group:MPI.Intracomm=None):
+    def backward(ctx, grad_output):
         input, = ctx.saved_tensors
-        if mp_size == 1:
-            return grad_output
-        return mp_group.scatter(grad_output, rank - rank % mp_size)
+        if ctx.mp_size == 1:
+            return grad_output, None, None, None
+        # print("len grad_output backward:",len(grad_output),"shape grad_output backward:",grad_output.shape)
+        split_tensors = torch.chunk(grad_output, ctx.mp_size, dim=3)
+        grad_output =  ctx.mp_group.scatter(split_tensors, root=0)
+        ctx.mp_group.barrier()
+        # print("len gather backward:",len(grad_output),"shape gather backward rank:",grad_output[ctx.rank%ctx.mp_size].shape)
+
+        return grad_output.to(input.device), None, None, None
+        # return ctx.mp_group.scatter(grad_output, ctx.rank - ctx.rank % ctx.mp_size), None, None, None
 
 class Mlp(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
@@ -210,6 +255,8 @@ class Block(nn.Module):
         if not self.input_parallel:
             #print(x.shape)
             x = self.scatter_fn(x, self.mp_size, rank, mp_group)
+            device = next(self.parameters()).device  # oder z.B. torch.device("cuda:0")
+            x = x.to(device)
             #print(x.shape)
         residual = x
         x = self.norm1(x)
@@ -290,7 +337,7 @@ class AFNONetMPDP(nn.Module):
         self.w = img_size[1] // self.patch_size[1]
 
         self.blocks = nn.ModuleList([
-            Block(dim=embed_dim/mp_size, mlp_ratio=mlp_ratio, drop=drop_rate, drop_path=dpr[i], norm_layer=norm_layer,
+            Block(dim=embed_dim//mp_size, mlp_ratio=mlp_ratio, drop=drop_rate, drop_path=dpr[i], norm_layer=norm_layer,
             num_blocks=self.num_blocks, sparsity_threshold=sparsity_threshold, hard_thresholding_fraction=hard_thresholding_fraction,
             input_parallel=False if i == 0 else True, output_parallel=True if i < depth-1 else False, mp_size=mp_size) 
         for i in range(depth)]) #NumBlocks = Diagonalmatrix von Attention
