@@ -5,6 +5,7 @@ from functools import partial
 from collections import OrderedDict
 from copy import Error, deepcopy
 from re import S
+import time
 from numpy.lib.arraypad import pad
 import numpy as np
 import torch
@@ -21,6 +22,7 @@ from utils.img_utils import PeriodicPad2d
 from mpi4py import MPI
 import torch.distributed as dist
 DEBUG = True
+FLAG = 0
 #TODO:
 ## DONE #functions for communication, forward and backward pass MLP and AFNO2D
 ## DONE #Split model size by world size MLP and AFNO2D
@@ -28,6 +30,9 @@ DEBUG = True
 #Dropout seeds plus epoch oder so -> über torch.randomseed oder test ob MLP dropout 1 benötigt
 
 # create comm group depending on world size and mp parallel size
+mp_group = None
+compute_time = 0
+comm_time = 0
 def create_mp_comm_group(mp_size):
     comm = MPI.COMM_WORLD
     world_size = comm.Get_size()
@@ -45,29 +50,62 @@ def create_mp_comm_group(mp_size):
 
 class ScatterGather(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, input, mp_size, rank, mp_group:MPI.Intracomm=None):
-        ctx.save_for_backward(input)
+    # def forward(ctx, input, mp_size, rank, mp_group:MPI.Intracomm=None):
+    def forward(ctx, input, mp_size, rank):
         ctx.mp_size = mp_size
-        ctx.rank = rank
-        ctx.mp_group = mp_group
         if mp_size == 1:
             return input
+        if DEBUG:
+            if rank == 0 and FLAG < 2:
+                print("ScatterGather forward","Rank:", rank, "Input shape forward:", input.shape, "input device:", input.device, "input size in bytes:", input.element_size()*input.nelement(),"mp_size:",mp_size)
+        ctx.device =input.device
+        ctx.rank = rank
+        # ctx.mp_group = mp_group
         # print("len input forward:",len(input),"shape input forward:",input.shape)
         # scatter input along dim=3 to all ranks in group
-        split_tensors = torch.chunk(input, mp_size, dim=3)
-        input = mp_group.scatter(split_tensors, root=0)
+        split_tensors = list(torch.chunk(input, mp_size, dim=3))
+        if DEBUG and FLAG < 2:
+            start_measure = time.time()
+        if ctx.mp_size == 8:
+            if ctx.rank%ctx.mp_size == 0:
+                for i in range(1,ctx.mp_size):
+                    mp_group.send(split_tensors[i], dest=i)
+                    input = split_tensors[0]
+            else:
+                input = mp_group.recv(source=0)
+        else:
+            input = mp_group.scatter(split_tensors, root=0)
+        if DEBUG and FLAG < 2:
+            print("Scatter time forward for one batch:",time.time()-start_measure, "rank:",rank)
+            start_measure = time.time()
         mp_group.barrier()
+        if DEBUG and FLAG < 2:
+            print("Barrier time scattergather forward for one batch:",time.time()-start_measure, "rank:",rank)
         # print("len scatter forward:",len(input),"shape scatter forward rank:",input[rank%mp_size].shape)
         return input
         # return mp_group.scatter(input, rank - rank % mp_size)
     @staticmethod
     def backward(ctx, grad_output):
-        input, = ctx.saved_tensors
         if ctx.mp_size == 1:
             return grad_output, None, None, None
-        device = input.device
-        grad_output =  ctx.mp_group.allgather(grad_output)
-        ctx.mp_group.barrier()
+        global FLAG
+        if DEBUG:
+            if ctx.rank == 0 and FLAG < 2:
+                FLAG += 1
+                print("ScatterGather backward","Rank:", ctx.rank, "Input shape forward:", grad_output.shape, "input device:", grad_output.device, "input size in bytes:", grad_output.element_size()*grad_output.nelement(),"mp_size:",ctx.mp_size)
+
+        device = ctx.device
+        if DEBUG and FLAG < 2:
+            start_measure = time.time()
+        grad_output =  mp_group.allgather(grad_output)
+        if DEBUG and FLAG < 2:
+            print("scattergather time backward for one batch:",time.time()-start_measure, "rank:",ctx.rank)
+            start_measure = time.time()
+        # grad_output =  ctx.mp_group.allgather(grad_output)
+        # ctx.mp_group.barrier()
+        mp_group.barrier()
+        if DEBUG and FLAG < 2:
+            print("Barrier time scattergather backward for one batch:",time.time()-start_measure, "rank:",ctx.rank)
         grad_output = [t.to(device) for t in grad_output]
         # if grad_output is not None:
         #     print("len scatter backward:",len(grad_output),"shape scatter backward rank:", ctx.rank, ["tensor: " + str(i) + " device: " + str(grad_output[i].get_device()) for i in range(len(grad_output))])
@@ -79,18 +117,30 @@ class ScatterGather(torch.autograd.Function):
     
 class GatherScatter(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, input, mp_size, rank, mp_group:MPI.Intracomm=None):
-        ctx.save_for_backward(input)
+    # def forward(ctx, input, mp_size, rank, mp_group:MPI.Intracomm=None):
+    def forward(ctx, input, mp_size, rank):
         ctx.mp_size = mp_size
-        ctx.rank = rank
-        ctx.mp_group = mp_group
         if mp_size == 1:
             return input
+        if DEBUG:
+            if rank == 0 and FLAG < 2:
+                print("GatherScatter forward","Rank:", rank, "Input shape forward:", input.shape, "input device:", input.device, "input size in bytes:", input.element_size()*input.nelement(),"mp_size:",mp_size)
+
+        ctx.rank = rank
+        # ctx.mp_group = mp_group
         device = input.device
+        ctx.device = device
         # print("device gather input forward:",device, "rank:",rank)
         # print("len  gather input forward:",len(input),"shape gather input forward:",input.shape)
+        if DEBUG and FLAG < 2:
+            start_measure = time.time()
         gathered_tensor = mp_group.allgather(input)
+        if DEBUG and FLAG < 2:
+            print("gatherscatter time forward for one batch:",time.time()-start_measure, "rank:",rank)
+            start_measure = time.time()
         mp_group.barrier()
+        if DEBUG and FLAG < 2:
+            print("Barrier time gatherscatter forward for one batch:",time.time()-start_measure, "rank:",rank)
         # if gathered_tensor is not None:
         #     print("len gather forward:",len(gathered_tensor),"shape gather forward rank:", ctx.rank, ["tensor: " + str(i) + " device: " + str(gathered_tensor[i].get_device()) for i in range(len(gathered_tensor))])
         gathered_tensor = [t.to(device) for t in gathered_tensor]
@@ -104,16 +154,37 @@ class GatherScatter(torch.autograd.Function):
         
     @staticmethod
     def backward(ctx, grad_output):
-        input, = ctx.saved_tensors
         if ctx.mp_size == 1:
             return grad_output, None, None, None
+        if DEBUG:
+            if ctx.rank == 0 and FLAG < 2:
+                print("GatherScatter backward","Rank:", ctx.rank, "Input shape forward:", grad_output.shape, "input device:", grad_output.device, "input size in bytes:", grad_output.element_size()*grad_output.nelement(),"mp_size:",ctx.mp_size)
+
+        device = ctx.device
         # print("len grad_output backward:",len(grad_output),"shape grad_output backward:",grad_output.shape)
         split_tensors = torch.chunk(grad_output, ctx.mp_size, dim=3)
-        grad_output =  ctx.mp_group.scatter(split_tensors, root=0)
-        ctx.mp_group.barrier()
+        if DEBUG and FLAG < 2:
+            start_measure = time.time()
+        if ctx.mp_size == 8:
+            if ctx.rank == 0:
+                for i in range(1,ctx.mp_size):
+                    mp_group.send(split_tensors[i], dest=i)
+                    grad_output = split_tensors[0]
+            else:
+                grad_output = mp_group.recv(source=0)
+        else:
+            grad_output =  mp_group.scatter(split_tensors, root=0)
+        if DEBUG and FLAG < 2:
+            print("gatherscatter time backward for one batch:",time.time()-start_measure, "rank:",ctx.rank)
+            start_measure = time.time()
+        # grad_output =  ctx.mp_group.scatter(split_tensors, root=0)
+        mp_group.barrier()
+        if DEBUG and FLAG < 2:
+            print("Barrier time gatherscatter backward for one batch:",time.time()-start_measure, "rank:",ctx.rank)
+        # ctx.mp_group.barrier()
         # print("len gather backward:",len(grad_output),"shape gather backward rank:",grad_output[ctx.rank%ctx.mp_size].shape)
 
-        return grad_output.to(input.device), None, None, None
+        return grad_output.to(device), None, None, None
         # return ctx.mp_group.scatter(grad_output, ctx.rank - ctx.rank % ctx.mp_size), None, None, None
 
 class Mlp(nn.Module):
@@ -250,13 +321,18 @@ class Block(nn.Module):
         
 
     def forward(self, x):
+        global comm_time
         rank = MPI.COMM_WORLD.Get_rank()
-        mp_group = create_mp_comm_group(self.mp_size)
+        # mp_group = create_mp_comm_group(self.mp_size)
         if not self.input_parallel:
+            start_time = time.time()
             #print(x.shape)
-            x = self.scatter_fn(x, self.mp_size, rank, mp_group)
+            # x = self.scatter_fn(x, self.mp_size, rank, mp_group)
+            x = self.scatter_fn(x, self.mp_size, rank)
             device = next(self.parameters()).device  # oder z.B. torch.device("cuda:0")
             x = x.to(device)
+            comm_time += time.time() - start_time
+
             #print(x.shape)
         residual = x
         x = self.norm1(x)
@@ -271,8 +347,11 @@ class Block(nn.Module):
         x = self.drop_path(x)
         x = x + residual
         if not self.output_parallel:
+            start_time = time.time()
             #print(x.shape)
-            x = self.gather_fn(x, self.mp_size, rank, mp_group)
+            # x = self.gather_fn(x, self.mp_size, rank, mp_group)
+            x = self.gather_fn(x, self.mp_size, rank)
+            comm_time += time.time() - start_time
             #print(x.shape)
         return x
 
@@ -316,7 +395,8 @@ class AFNONetMPDP(nn.Module):
         self.head_is_synced = False
         self.params = params
         mp_size = params.mp_size
-        
+        global mp_group
+        mp_group = create_mp_comm_group(mp_size)
         self.img_size = img_size
         self.patch_size = (params.patch_size, params.patch_size)
         self.in_chans = params.N_in_channels
@@ -376,13 +456,17 @@ class AFNONetMPDP(nn.Module):
         return x
 
     def forward(self, x):
+        global compute_time, comm_time
+        start_time = time.time()
         x = self.forward_features(x)
         if not self.head_is_synced:
+            start_comm_time = time.time()
             self.head_is_synced = True
             for param in self.head.parameters():
                 dist.broadcast(
                     param, 0, group=None
                 )
+            comm_time += time.time() - start_comm_time
         x = self.head(x)
         x = rearrange(
             x,
@@ -392,6 +476,11 @@ class AFNONetMPDP(nn.Module):
             h=self.img_size[0] // self.patch_size[0],
             w=self.img_size[1] // self.patch_size[1],
         )
+        compute_time += time.time() - start_time
+        global FLAG
+        if FLAG == 0:
+            print("Rank:", MPI.COMM_WORLD.Get_rank(),"Compute Time:", compute_time,"Comm Time:", comm_time)
+            FLAG = 1
         return x
 
 

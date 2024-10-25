@@ -64,7 +64,7 @@ afno_backbone: &backbone
   <<: *FULL_FIELD
   log_to_wandb: !!bool True
   lr: 5E-4
-  batch_size: 16
+  batch_size: 64
   max_epochs: 150
   scheduler: 'CosineAnnealingLR'
   in_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
@@ -87,7 +87,7 @@ afno_backbone_orography: &backbone_orography
 afno_backbone_finetune:
   <<: *backbone
   lr: 1E-4
-  batch_size: 16
+  batch_size: 64
   log_to_wandb: !!bool True
   max_epochs: 50
   pretrained: !!bool True

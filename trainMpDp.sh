@@ -1,12 +1,12 @@
 #!/usr/bin/env bash 
 
-#SBATCH --time=48:00:00
+#SBATCH --time=30:00:00
 #SBATCH --gres=gpu:4
 #SBATCH --nodes=16
 #SBATCH --ntasks-per-node=4
 
-#SBATCH -J 1MP
-#SBATCH --output="/hkfs/work/workspace/scratch/ie5012-MA/results/241008/fcn_mpdp_1.out"
+#SBATCH -J 1MP_Finetune
+#SBATCH --output="/hkfs/work/workspace/scratch/ie5012-MA/results/241023/fcn_mpdp_1_finetune.out"
 #SBATCH -p accelerated
 #SBATCH --mem=501600mb
 #SBATCH --mail-type=ALL
@@ -16,14 +16,15 @@ ml restore MA41
 
 BASE_DIR="/hkfs/work/workspace/scratch/ie5012-MA"
 config_file="${BASE_DIR}/FourCastNet/config/AFNOMUDP1.yaml"
-config="afno_backbone" 
+# config="afno_backbone" 
+config="afno_backbone_finetune" 
 run_num="0"
 
 export HDF5_USE_FILE_LOCKING=FALSE
 export NCCL_NET_GDR_LEVEL=PHB
-export WANDB_MODE=offline
+# export WANDB_MODE=offline
 export WANDB_START_METHOD="thread"
-
+export WANDB_API_KEY=239f4e150ee486bc13a02cacd1c44c40d8556b73
 # SRUN_PARAMS=(
 #   --mpi="pmi2"
 #   --gpus-per-task=1
