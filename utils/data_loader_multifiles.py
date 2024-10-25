@@ -62,7 +62,7 @@ def get_data_loader(params, files_pattern, distributed, train, rank=None, world_
 
   dataset = GetDataset(params, files_pattern, train)
   sampler = DistributedSampler(dataset,num_replicas=world_size, rank=rank//params.mp_size if rank != None else rank, shuffle=train) if distributed else None  ### Edited by Robin Maurer
-  
+  # print("batch size: ", int(params.batch_size))
   dataloader = DataLoader(dataset,
                           batch_size=int(params.batch_size),#//params.mp_size if distributed else int(params.batch_size), ### Edited by Robin Maurer
                           num_workers=params.num_data_workers,
