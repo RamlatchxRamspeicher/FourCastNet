@@ -90,7 +90,8 @@ DECORRELATION_TIME = 36 # 9 days
 import json
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap as ruamelDict
-import perun
+import perun # added by Robin Maurer
+from mpi4py import MPI # Added by Robin Maurer
 
 class Trainer():
   def count_parameters(self):
@@ -103,7 +104,8 @@ class Trainer():
     self.device = torch.cuda.current_device() if torch.cuda.is_available() else 'cpu'
 
     if params.log_to_wandb:
-      wandb.init(config=params, name=params.name, group=params.group, project=params.project, entity=params.entity)
+      # wandb.init(config=params, name=params.name, group=params.group, project=params.project, entity=params.entity)
+      wandb.init(config=params, name=params.name, project=params.project, entity=params.entity)
 
     logging.info('rank %d, begin data loader init'%world_rank)
     self.train_data_loader, self.train_dataset, self.train_sampler = get_data_loader(params, params.train_data_path, dist.is_initialized(), train=True, rank=world_rank-world_rank%params.mp_size if params.mp_size >1 else None, world_size=get_world_size()//params.mp_size)  ### Edited by Robin Maurer
@@ -293,11 +295,11 @@ class Trainer():
 
       if self.params.log_to_screen:
         logging.info('Time taken for epoch {} is {} sec'.format(epoch + 1, time.time()-start))
-        #logging.info('train data time={}, train step time={}, valid step time={}'.format(data_time, tr_time, valid_time))
+        logging.info('train data time={}, train step time={}, valid step time={}'.format(data_time, tr_time, valid_time))
         logging.info('Train loss: {}. Valid loss: {}'.format(train_logs['loss'], valid_logs['valid_loss']))
+      # logging.info("compute_time: {}. comm_time: {}. epoch_time: {}".format(compute_time-comm_time, comm_time, time.time()-start))
 #        if epoch==self.params.max_epochs-1 and self.params.prediction_type == 'direct':
 #          logging.info('Final Valid RMSE: Z500- {}. T850- {}, 2m_T- {}'.format(valid_weighted_rmse[0], valid_weighted_rmse[1], valid_weighted_rmse[2]))
-
 
 
   def train_one_epoch(self):
@@ -305,7 +307,7 @@ class Trainer():
     tr_time = 0
     data_time = 0
     self.model.train()
-    
+    #print("rank: ", self.world_rank, "epoch: ", self.epoch, "dataloadersize: ", len(self.train_data_loader))
     for i, data in enumerate(self.train_data_loader, 0):
       self.iters += 1
       # adjust_LR(optimizer, params, iters)
@@ -357,7 +359,7 @@ class Trainer():
       if self.params.enable_amp:
         self.gscaler.update()
 
-      if dist.get_rank() == 0: print("batch: ", i, "loss: ", loss.item(), "time taken: ", time.time()-tr_start)
+      #if dist.get_rank() == 0: print("batch: ", i,"/",len(self.train_data_loader), "loss: ", loss.item(), "time taken: ", time.time()-tr_start)
 
       tr_time += time.time() - tr_start
     
@@ -367,9 +369,15 @@ class Trainer():
         logs = {'loss': loss}
 
     if dist.is_initialized():
+      global DEBUGPRINT
       for key in sorted(logs.keys()):
-        dist.all_reduce(logs[key].detach())
-        logs[key] = float(logs[key]/dist.get_world_size())
+        if DEBUGPRINT:
+          start_measure = time.time()
+        logs[key]=MPI.COMM_WORLD.allreduce(logs[key].detach(), op=MPI.SUM) #Added by Robin Maurer
+        if DEBUGPRINT:
+          print("allreduce time for losses: ", time.time()-start_measure, "rank: ", self.world_rank)
+        #dist.all_reduce(logs[key].detach())
+        logs[key] = float(logs[key]/(dist.get_world_size()/self.params.mp_size))
 
     if self.params.log_to_wandb:
       wandb.log(logs, step=self.epoch)
@@ -459,8 +467,16 @@ class Trainer():
 
            
     if dist.is_initialized():
-      dist.all_reduce(valid_buff)
-      dist.all_reduce(valid_weighted_rmse)
+      if DEBUGPRINT:
+        start_measure = time.time()
+      valid_buff = MPI.COMM_WORLD.allreduce(valid_buff, op=MPI.SUM) #Added by Robin Maurer
+      valid_weighted_rmse = MPI.COMM_WORLD.allreduce(valid_weighted_rmse, op=MPI.SUM) #Added by Robin Maurer
+      if DEBUGPRINT:
+        print("allreduce time for valid_buff: ", time.time()-start_measure, "rank: ", self.world_rank)
+        DEBUGPRINT = False
+
+      # dist.all_reduce(valid_buff)
+      # dist.all_reduce(valid_weighted_rmse)
 
     # divide by number of steps
     valid_buff[0:2] = valid_buff[0:2] / valid_buff[2]
@@ -618,7 +634,12 @@ if __name__ == '__main__':
     args.gpu = local_rank
     # world_rank = dist.get_rank()                  ### Edited by Robin Maurer
     params['global_batch_size'] = params.batch_size
-    params['batch_size'] = int(params.batch_size//params['world_size'])  
+    if params["nettype"] == "afnodist_mp_dp":  ### Added by Robin Maurer
+      params['batch_size'] = int(params.batch_size//(params['world_size']//params['mp_size']))
+    else:
+      params['batch_size'] = int(params.batch_size//params['world_size'])
+    # params['batch_size'] = int(params.batch_size//params['world_size'])
+    
 
   #print(params.batch_size)
   torch.cuda.set_device(local_rank)
@@ -647,8 +668,8 @@ if __name__ == '__main__':
 #  params['group'] = "era5_wind" + args.config
   params['name'] = args.config + '_' + str(args.run_num)
   params['group'] = "era5_precip" + args.config
-  params['project'] = "ERA5_precip"
-  params['entity'] = "flowgan"
+  params['project'] = "Masterthesis"
+  params['entity'] = "ramlatch-karlsruhe-institute-of-technology"
   if world_rank==0:
     logging_utils.log_to_file(logger_name=None, log_filename=os.path.join(expDir, 'out.log'))
     logging_utils.log_versions()
@@ -674,7 +695,9 @@ if __name__ == '__main__':
     with open(os.path.join(expDir, 'hyperparams.yaml'), 'w') as hpfile:
       yaml.dump(hparams,  hpfile )
   mp_size = params['mp_size']  ### Added by Robin Maurer
-  print(world_rank)
+  # print(world_rank)
+  DEBUGPRINT = True
   trainer = Trainer(params, world_rank)
   trainer.train()
   logging.info('DONE ---- rank %d'%world_rank)
+  dist.destroy_process_group(dist.group.WORLD) if dist.is_initialized() else None  ### Added by Robin Maurer
