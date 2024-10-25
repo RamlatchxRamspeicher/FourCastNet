@@ -138,7 +138,7 @@ def init_local_group(batchnorm_group_size, batchnorm_group_stride=1):
                 end = start + batchnorm_group_size * batchnorm_group_stride
                 ranks = list(range(start, end, batchnorm_group_stride))
                 local_groups.append(ranks)
-                tmp_group = dist.new_group(ranks=ranks)
+                tmp_group = dist.new_group(ranks=ranks, group_desc="mp_group")
                 if my_rank in ranks:
                     local_group = tmp_group
     return local_group
