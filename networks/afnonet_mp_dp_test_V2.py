@@ -161,7 +161,7 @@ class ScatterGather(torch.autograd.Function):
         if mp_size == 1:
             return input
         ctx.device =input.device
-        input = ScatterVWrapperV1_5(input, mp_size)
+        input = ScatterVWrapperV2(input, mp_size)
         return input
 
     @staticmethod
@@ -169,7 +169,7 @@ class ScatterGather(torch.autograd.Function):
         if ctx.mp_size == 1:
             return grad_output, None, None, None
         device = ctx.device
-        grad_output = AllGatherVWrapperV1(grad_output, ctx.mp_size)
+        grad_output = AllGatherVWrapperV2(grad_output, ctx.mp_size)
         return grad_output, None, None, None
     
 class GatherScatter(torch.autograd.Function):
@@ -179,7 +179,7 @@ class GatherScatter(torch.autograd.Function):
         if mp_size == 1:
             return input
         ctx.device = input.device
-        input = AllGatherVWrapperV1(input, mp_size)
+        input = AllGatherVWrapperV2(input, mp_size)
         return input
         
     @staticmethod
@@ -187,7 +187,7 @@ class GatherScatter(torch.autograd.Function):
         if ctx.mp_size == 1:
             return grad_output, None, None, None
         device = ctx.device
-        grad_output = ScatterVWrapperV1_5(grad_output, ctx.mp_size)
+        grad_output = ScatterVWrapperV2(grad_output, ctx.mp_size)
         return grad_output.to(device), None, None, None
 
 class Mlp(nn.Module):
