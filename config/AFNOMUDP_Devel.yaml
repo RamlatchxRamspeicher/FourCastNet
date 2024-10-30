@@ -78,33 +78,34 @@ afno_backbone: &backbone
   time_means_path:   '/hkfs/work/workspace/scratch/ie5012-MA/data/stats/time_means.npy'
   global_means_path: '/hkfs/work/workspace/scratch/ie5012-MA/data/stats/global_means.npy'
   global_stds_path:  '/hkfs/work/workspace/scratch/ie5012-MA/data/stats/global_stds.npy'
+  group: 'Develop'
 
 afno_backbone_one: &backbone_one
   <<: *backbone
   mp_size: 1
   exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/.spike/develop/results/1'
-  batch_size: 8
+  batch_size: 1
   max_epochs: 10
 
 afno_backbone_two: &backbone_two
   <<: *backbone
   mp_size: 2
   exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/.spike/develop/results/2'
-  batch_size: 8
+  batch_size: 1
   max_epochs: 10
 
 afno_backbone_four: &backbone_four
   <<: *backbone
   mp_size: 4
   exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/.spike/develop/results/4'
-  batch_size: 8
+  batch_size: 1
   max_epochs: 10
 
 afno_backbone_eight: &backbone_eight
   <<: *backbone
   mp_size: 8
   exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/.spike/develop/results/8'
-  batch_size: 8
+  batch_size: 1
   max_epochs: 10
 
 afno_backbone_batch: &backbone_batch
