@@ -78,7 +78,7 @@ from utils.YParams import YParams
 from utils.data_loader_multifiles import get_data_loader
 from networks.afnonet import AFNONet, PrecipNet
 from networks.afnonet_mp_v1 import AFNONetDist
-from networks.afnonet_mp_dp import AFNONetMPDP
+from networks.afnonet_mp_dp_torchdist import AFNONetMPDP
 from utils.img_utils import vis_precip
 import wandb
 from utils.weighted_acc_rmse import weighted_acc, weighted_rmse, weighted_rmse_torch, unlog_tp_torch
@@ -104,8 +104,8 @@ class Trainer():
     self.device = torch.cuda.current_device() if torch.cuda.is_available() else 'cpu'
 
     if params.log_to_wandb:
-      # wandb.init(config=params, name=params.name, group=params.group, project=params.project, entity=params.entity)
-      wandb.init(config=params, name=params.name, project=params.project, entity=params.entity)
+      wandb.init(config=params, name=params.name, group=params.group, project=params.project, entity=params.entity)
+      # wandb.init(config=params, name=params.name, project=params.project, entity=params.entity)
 
     logging.info('rank %d, begin data loader init'%world_rank)
     self.train_data_loader, self.train_dataset, self.train_sampler = get_data_loader(params, params.train_data_path, dist.is_initialized(), train=True, rank=world_rank-world_rank%params.mp_size if params.mp_size >1 else None, world_size=get_world_size()//params.mp_size)  ### Edited by Robin Maurer
@@ -260,10 +260,8 @@ class Trainer():
         self.train_sampler.set_epoch(epoch)
 #        self.valid_sampler.set_epoch(epoch)
 
-      dist.group.WORLD.barrier() if dist.is_initialized() else None  ### Added by Robin Maurer
       start = time.time()
       tr_time, data_time, train_logs = self.train_one_epoch()
-      dist.group.WORLD.barrier() if dist.is_initialized() else None  ### Added by Robin Maurer
 
       valid_time, valid_logs = self.validate_one_epoch()
       if epoch==self.params.max_epochs-1 and self.params.prediction_type == 'direct':
@@ -363,16 +361,18 @@ class Trainer():
       #if dist.get_rank() == 0: print("batch: ", i,"/",len(self.train_data_loader), "loss: ", loss.item(), "time taken: ", time.time()-tr_start)
 
       tr_time += time.time() - tr_start
+      if dist.get_rank() == 0 and i%(len(self.train_data_loader)//100)==0: print("Progress of epoch: ", i*100/len(self.train_data_loader),"%") 
     
     try:
         logs = {'loss': loss, 'loss_step_one': loss_step_one, 'loss_step_two': loss_step_two}
     except:
         logs = {'loss': loss}
 
-    if dist.is_initialized():
-      for key in sorted(logs.keys()):
-        dist.group.WORLD.allreduce(logs[key].detach())  ### Edited by Robin Maurer
-        logs[key] = float(logs[key]/get_world_size())   ### Edited by Robin Maurer
+    # if dist.is_initialized():
+    #   for key in sorted(logs.keys()):
+    #     logs[key] = logs[key]/mp_size
+    #     dist.group.WORLD.allreduce(logs[key].detach())  ### Edited by Robin Maurer
+    #     logs[key] = float(logs[key]/(get_world_size()/mp_size))   ### Edited by Robin Maurer
 
     if self.params.log_to_wandb:
       wandb.log(logs, step=self.epoch)
@@ -462,6 +462,9 @@ class Trainer():
 
            
     if dist.is_initialized():
+      valid_buff[0] = valid_buff[0]/mp_size
+      valid_buff[1] = valid_buff[1]/mp_size
+      valid_weighted_rmse = valid_weighted_rmse/mp_size
       dist.group.WORLD.allreduce(valid_buff)             ### Edited by Robin Maurer
       dist.group.WORLD.allreduce(valid_weighted_rmse)    ### Edited by Robin Maurer
 
@@ -607,25 +610,25 @@ if __name__ == '__main__':
   params = YParams(os.path.abspath(args.yaml_config), args.config)
   params['epsilon_factor'] = args.epsilon_factor
   from utils.comm import init, get_local_rank, get_world_rank, get_world_size  ### Added by Robin Maurer
-  init("nccl-slurm",batchnorm_group_size=params["mp_size"])  ### Added by Robin Maurer
+  init("nccl-slurm")#,batchnorm_group_size=params["mp_size"])  ### Added by Robin Maurer
   params['world_size'] = get_world_size()  ### Added by Robin Maurer
   # if 'WORLD_SIZE' in os.environ:    ### Edited by Robin Maurer
     # params['world_size'] = int(os.environ['WORLD_SIZE'])  ### Edited by Robin Maurer
 
   world_rank = get_world_rank()  ### Added by Robin Maurer
   local_rank = get_local_rank()  ### Added by Robin Maurer
-  if params['world_size'] > 1 and params['nettype'] not in ['afnodist',"afnodist_mp"]:  ### Edited by Robin Maurer
-    # dist.init_process_group(backend='nccl',         ### Edited by Robin Maurer
-    #                         init_method='env://')   ### Edited by Robin Maurer
-    # local_rank = int(os.environ["LOCAL_RANK"])    ### Edited by Robin Maurer
-    args.gpu = local_rank
-    # world_rank = dist.get_rank()                  ### Edited by Robin Maurer
-    params['global_batch_size'] = params.batch_size
-    if params["nettype"] == "afnodist_mp_dp":  ### Added by Robin Maurer
-      params['batch_size'] = int(params.batch_size//(params['world_size']//params['mp_size']))
-    else:
-      params['batch_size'] = int(params.batch_size//params['world_size'])
-    # params['batch_size'] = int(params.batch_size//params['world_size'])
+  # if params['world_size'] > 1 and params['nettype'] not in ['afnodist',"afnodist_mp"]:  ### Edited by Robin Maurer
+  #   # dist.init_process_group(backend='nccl',         ### Edited by Robin Maurer
+  #   #                         init_method='env://')   ### Edited by Robin Maurer
+  #   # local_rank = int(os.environ["LOCAL_RANK"])    ### Edited by Robin Maurer
+  #   args.gpu = local_rank
+  #   # world_rank = dist.get_rank()                  ### Edited by Robin Maurer
+  #   params['global_batch_size'] = params.batch_size
+  #   if params["nettype"] == "afnodist_mp_dp":  ### Added by Robin Maurer
+  #     params['batch_size'] = int(params.batch_size//(params['world_size']//params['mp_size']))
+  #   else:
+  #     params['batch_size'] = int(params.batch_size//params['world_size'])
+  #   # params['batch_size'] = int(params.batch_size//params['world_size'])
     
 
   #print(params.batch_size)
@@ -653,8 +656,8 @@ if __name__ == '__main__':
   # this will be the wandb name
 #  params['name'] = args.config + '_' + str(args.run_num)
 #  params['group'] = "era5_wind" + args.config
-  params['name'] = args.config + '_' + str(args.run_num)
-  params['group'] = "era5_precip" + args.config
+  params['name'] = args.config + '_' + str(args.run_num) + '_test_torchdist_' + str(params['nettype']) + '_mp' + str(params['mp_size']) 
+  # params['group'] = "era5_precip" + args.config
   params['project'] = "Masterthesis"
   params['entity'] = "ramlatch-karlsruhe-institute-of-technology"
   if world_rank==0:

@@ -22,6 +22,7 @@ from utils.img_utils import PeriodicPad2d
 from mpi4py import MPI
 import torch.distributed as dist
 from utils.comm import init_local_group
+import logging
 DEBUG = True
 FLAG = 0
 #TODO:
@@ -51,7 +52,7 @@ class ScatterGather(torch.autograd.Function):
             return input
         if DEBUG:
             if rank == 0 and FLAG < 2:
-                print("ScatterGather forward","Rank:", rank, "Input shape forward:", input.shape, "input device:", input.device, "input size in bytes:", input.element_size()*input.nelement(),"mp_size:",mp_size)
+                print("ScatterGather forward","Rank:", rank, "Input shape forward:", input.shape, "input device:", input.device, "input size in bytes:", 4*input.nelement(),"mp_size:",mp_size)
         ctx.device = input.device
         ctx.rank = rank
         src = rank - rank % mp_size
@@ -68,7 +69,7 @@ class ScatterGather(torch.autograd.Function):
         if DEBUG:
             if ctx.rank == 0 and FLAG < 2:
                 FLAG += 1
-                print("ScatterGather backward","Rank:", ctx.rank, "Input shape forward:", grad_output.shape, "input device:", grad_output.device, "input size in bytes:", grad_output.element_size()*grad_output.nelement(),"mp_size:",ctx.mp_size)
+                print("ScatterGather backward","Rank:", ctx.rank, "Input shape forward:", grad_output.shape, "input device:", grad_output.device, "input size in bytes:", 4*grad_output.nelement(),"mp_size:",ctx.mp_size)
 
         device = ctx.device
         gathered_tensor = [torch.empty_like(grad_output) for _ in range(ctx.mp_size)]
@@ -87,7 +88,7 @@ class GatherScatter(torch.autograd.Function):
             return input
         if DEBUG:
             if rank == 0 and FLAG < 2:
-                print("GatherScatter forward","Rank:", rank, "Input shape forward:", input.shape, "input device:", input.device, "input size in bytes:", input.element_size()*input.nelement(),"mp_size:",mp_size)
+                print("GatherScatter forward","Rank:", rank, "Input shape forward:", input.shape, "input device:", input.device, "input size in bytes:", 4*input.nelement(),"mp_size:",mp_size)
 
         ctx.device=input.device
         ctx.rank = rank
@@ -105,7 +106,7 @@ class GatherScatter(torch.autograd.Function):
             return grad_output, None, None, None
         if DEBUG:
             if ctx.rank == 0 and FLAG < 2:
-                print("GatherScatter backward","Rank:", ctx.rank, "Input shape forward:", grad_output.shape, "input device:", grad_output.device, "input size in bytes:", grad_output.element_size()*grad_output.nelement(),"mp_size:",ctx.mp_size)
+                print("GatherScatter backward","Rank:", ctx.rank, "Input shape forward:", grad_output.shape, "input device:", grad_output.device, "input size in bytes:", 4*grad_output.nelement(),"mp_size:",ctx.mp_size)
 
         src = ctx.rank - ctx.rank % ctx.mp_size
         split_tensors = list(torch.chunk(grad_output, ctx.mp_size, dim=3))
@@ -407,7 +408,7 @@ class AFNONetMPDP(nn.Module):
         compute_time += time.time() - start_time
         global FLAG
         if FLAG == 0:
-            print("Rank:", MPI.COMM_WORLD.Get_rank(),"Compute Time:", compute_time,"Comm Time:", comm_time)
+            print("Rank:", MPI.COMM_WORLD.Get_rank(),"Compute Time:", compute_time-comm_time,"Comm Time:", comm_time)
             FLAG = 1
         return x
 
