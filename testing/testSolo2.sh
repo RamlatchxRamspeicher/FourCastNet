@@ -6,7 +6,7 @@
 #SBATCH --ntasks-per-node=2
 
 #SBATCH -J T_S_2
-#SBATCH --output="/hkfs/work/workspace/scratch/ie5012-MA/.spike/results/241026/torch_2rd_solo_2.out"
+#SBATCH --output="/hkfs/work/workspace/scratch/ie5012-MA/.spike/results/301026/torch_2.out"
 #SBATCH -p accelerated
 #SBATCH --mem=501600mb
 #SBATCH --mail-type=NONE
