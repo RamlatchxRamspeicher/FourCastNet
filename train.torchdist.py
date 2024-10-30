@@ -306,6 +306,7 @@ class Trainer():
     tr_time = 0
     data_time = 0
     self.model.train()
+    flag = True
     #print("rank: ", self.world_rank, "epoch: ", self.epoch, "dataloadersize: ", len(self.train_data_loader))
     for i, data in enumerate(self.train_data_loader, 0):
       self.iters += 1
@@ -347,6 +348,9 @@ class Trainer():
             else:
               gen = self.model(inp).to(self.device, dtype = torch.float)
             loss = self.loss_obj(gen, tar)
+            if flag:
+               logging.info("Loss: ", loss.item(), "rank:", self.world_rank)
+               flag = False
 
       if self.params.enable_amp:
         self.gscaler.scale(loss).backward()
@@ -361,7 +365,9 @@ class Trainer():
       #if dist.get_rank() == 0: print("batch: ", i,"/",len(self.train_data_loader), "loss: ", loss.item(), "time taken: ", time.time()-tr_start)
 
       tr_time += time.time() - tr_start
-      if dist.get_rank() == 0 and i%(len(self.train_data_loader)//100)==0: print("Progress of epoch: ", i*100/len(self.train_data_loader),"%") 
+      if i < 10:
+        logging.info("Epoch: {}, Batch: {}, Loss: {}, Rank: {}".format(self.epoch, i, loss.item(), self.world_rank))
+      if dist.get_rank() == 0 and i%(len(self.train_data_loader)//100)==0: logging.info(f"Progress of epoch: {i*100/len(self.train_data_loader)} %, batch: {i}/{len(self.train_data_loader)}") 
     
     try:
         logs = {'loss': loss, 'loss_step_one': loss_step_one, 'loss_step_two': loss_step_two}
@@ -643,8 +649,8 @@ if __name__ == '__main__':
       os.makedirs(os.path.join(expDir, 'training_checkpoints/'))
 
   params['experiment_dir'] = os.path.abspath(expDir)
-  params['checkpoint_path'] = os.path.join(expDir, 'training_checkpoints/ckpt.tar')
-  params['best_checkpoint_path'] = os.path.join(expDir, 'training_checkpoints/best_ckpt.tar')
+  params['checkpoint_path'] = os.path.join(expDir, f'training_checkpoints/ckpt_mp{params.mp_size}_{local_rank}.tar')
+  params['best_checkpoint_path'] = os.path.join(expDir, f'training_checkpoints/best_ckpt_mp{params.mp_size}_{local_rank}.tar')
 
   # Do not comment this line out please:
   args.resuming = True if os.path.isfile(params.checkpoint_path) else False

@@ -57,9 +57,9 @@ class ScatterGather(torch.autograd.Function):
         ctx.rank = rank
         src = rank - rank % mp_size
         split_tensors = list(torch.chunk(input, mp_size, dim=3))
-        recived_tensor = torch.empty_like(split_tensors[0])
-        dist.scatter(recived_tensor,split_tensors if src == rank else None, src=src,group=mp_group)
-        return recived_tensor
+        received_tensor = torch.empty_like(split_tensors[0])
+        dist.scatter(received_tensor,split_tensors if src == rank else None, src=src,group=mp_group)
+        return received_tensor
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -110,10 +110,10 @@ class GatherScatter(torch.autograd.Function):
 
         src = ctx.rank - ctx.rank % ctx.mp_size
         split_tensors = list(torch.chunk(grad_output, ctx.mp_size, dim=3))
-        recived_tensor = torch.empty_like(split_tensors[0])
-        dist.scatter(recived_tensor,split_tensors if src==ctx.rank else None, src=src,group=mp_group)
+        received_tensor = torch.empty_like(split_tensors[0])
+        dist.scatter(received_tensor,split_tensors if src==ctx.rank else None, src=src,group=mp_group)
 
-        return recived_tensor.to(ctx.device), None, None, None
+        return received_tensor.to(ctx.device), None, None, None
         # return ctx.mp_group.scatter(grad_output, ctx.rank - ctx.rank % ctx.mp_size), None, None, None
 
 class Mlp(nn.Module):
