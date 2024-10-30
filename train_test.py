@@ -111,7 +111,7 @@ class Trainer():
       # wandb.init(config=params, name=params.name, project=params.project, entity=params.entity)
 
     logging.info('rank %d, begin data loader init'%world_rank)
-    self.train_data_loader, self.train_dataset, self.train_sampler = get_data_loader(params, params.train_data_path, dist.is_initialized(), train=True, rank=world_rank-world_rank%params.mp_size if params.mp_size >1 else None, world_size=get_world_size()//params.mp_size)  ### Edited by Robin Maurer
+    self.train_data_loader, self.train_dataset, self.train_sampler = get_data_loader(params, params.train_data_path, dist.is_initialized(), train=True, rank=world_rank-world_rank%params.mp_size if params.mp_size >1 else None, world_size=MPI.COMM_WORLD.Get_size()//params.mp_size)  ### Edited by Robin Maurer
     self.valid_data_loader, self.valid_dataset = get_data_loader(params, params.valid_data_path, dist.is_initialized(), train=False)
     self.loss_obj = LpLoss()
     logging.info('rank %d, data loader initialized'%world_rank)
@@ -215,6 +215,7 @@ class Trainer():
   def train(self):
     if self.params.log_to_screen:
       logging.info("Starting Training Loop...")
+      logging.info("dist is initialized: {}".format(dist.is_initialized()))
 
     best_valid_loss = 1.e6
     for epoch in range(self.startEpoch, self.params.max_epochs):
@@ -267,6 +268,7 @@ class Trainer():
     tr_time = 0
     data_time = 0
     self.model.train()
+    flag = True
     for i, data in enumerate(self.train_data_loader, 0):
       self.iters += 1
       # adjust_LR(optimizer, params, iters)
@@ -307,6 +309,10 @@ class Trainer():
             else:
               gen = self.model(inp).to(self.device, dtype = torch.float)
             loss = self.loss_obj(gen, tar)
+            if flag:
+              logging.info(f"Loss: {loss}, rank: {self.world_rank}")
+              flag = False
+
 
       if self.params.enable_amp:
         self.gscaler.scale(loss).backward()
@@ -317,7 +323,9 @@ class Trainer():
 
       if self.params.enable_amp:
         self.gscaler.update()
-      if MPI.COMM_WORLD.Get_rank() == 0 and i%(len(self.train_data_loader)//100)==0: logging.info(f"Progress of epoch:  {i*100/len(self.train_data_loader)}") 
+      if i < 10:
+        logging.info("Epoch: {}, Batch: {}, Loss: {}, Rank: {}".format(self.epoch, i, loss.item(), self.world_rank))
+      if MPI.COMM_WORLD.Get_rank() == 0 and i%(len(self.train_data_loader)//100)==0: logging.info(f"Progress of epoch: {i*100/len(self.train_data_loader)} %, batch: {i}/{len(self.train_data_loader)}") 
       tr_time += time.time() - tr_start
     
     try:
@@ -580,6 +588,7 @@ if __name__ == '__main__':
   else:  ### Added by Robin Maurer
      world_rank = MPI.COMM_WORLD.Get_rank()  ### Added by Robin Maurer
      local_rank = world_rank  ### Added by Robin Maurer
+     params['world_size'] = MPI.COMM_WORLD.Get_size()  ### Added by Robin Maurer
   if params['world_size'] > 1 and params['nettype'] not in ['afnodist',"afnodist_mp"]:  ### Edited by Robin Maurer
     # dist.init_process_group(backend='nccl',         ### Edited by Robin Maurer
     #                         init_method='env://')   ### Edited by Robin Maurer
@@ -595,7 +604,7 @@ if __name__ == '__main__':
     
 
   #print(params.batch_size)
-  torch.cuda.set_device(local_rank)
+  torch.cuda.set_device(local_rank%4)
   torch.backends.cudnn.benchmark = True
 
   # Set up directory
