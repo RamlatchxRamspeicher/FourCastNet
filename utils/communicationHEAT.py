@@ -2026,11 +2026,11 @@ class MPICommunication(Communication):
 
         # permute the send_axis order so that the split send_axis is the first to be transmitted
         if self.rank == kwargs.get("root"):
-            send_axis_permutation = list(range(sendbuf.ndimension()))
+            send_axis_permutation = list(range(sendbuf.dim()))#ndimension()))
             send_axis_permutation[0], send_axis_permutation[send_axis] = send_axis, 0
             sendbuf = sendbuf.permute(*send_axis_permutation)
 
-        recv_axis_permutation = list(range(recvbuf.ndimension()))
+        recv_axis_permutation = list(range(recvbuf.dim()))#ndimension()))
         recv_axis_permutation[0], recv_axis_permutation[recv_axis] = recv_axis, 0
         recvbuf = recvbuf.permute(*recv_axis_permutation)
 
@@ -2175,7 +2175,7 @@ class MPICommunication(Communication):
     def Scatterv(
         self,
         sendbuf: Union[torch.Tensor, Any],
-        recvbuf: int,
+        recvbuf: Union[torch.Tensor, Any],#int,
         root: int = 0,
         axis: int = 0,
         recv_axis: int = None,
