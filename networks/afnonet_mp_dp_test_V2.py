@@ -21,15 +21,20 @@ from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
 from utils.img_utils import PeriodicPad2d
 from mpi4py import MPI
-import torch.distributed as dist
 from utils.communicationHEAT import *
 
-DEBUG = True
+DEBUG = False
 FLAG = 0
 comm_time = 0
 compute_time = 0
-
-comm = MPICommunication(MPI.COMM_WORLD) # Added by Robin Maurer
+mp_group = None
+def create_mp_comm_group(mp_size):
+    comm = MPI.COMM_WORLD
+    world_size = comm.Get_size()
+    rank = comm.Get_rank()
+    assert world_size % mp_size == 0, f"world_size {world_size} should be divisible by mp_size {mp_size}"
+    comm_group = comm.group.Incl([i for i in range(rank-rank%mp_size, rank-rank%mp_size+mp_size)])
+    return MPICommunication(comm.Create_group(comm_group))
 
 def split_tensor_along_dim(tensor, dim, num_chunks):
 
@@ -53,105 +58,49 @@ def split_tensor_along_dim(tensor, dim, num_chunks):
 
     return tensor_list
 
-def ScatterVWrapperV1(input,mp_size):
-    #split input tensor (1, 90, 180, 768) along dim=3
-    #create MPImemory sendbuf from input tensor
-    #create recvbuf
-    #scatter input tensor to all ranks
-    #turn recvbuf into tensor
-    #return tensor
-    rank = comm.rank
-    split_tensors = split_tensor_along_dim(input, 3, mp_size)
-    local_rank = rank%mp_size
-
-    if local_rank == 0:
-        scounts = tuple([t.numel() for t in split_tensors])
-        sdispls = tuple([0] + [sum(scounts[:i]) for i in range(1, len(scounts))])
-        sendbuf = comm.as_buffer(input,scounts,sdispls)
-    else:
-        sendbuf = None
-
-    recvbuf = torch.zeros_like(split_tensors[local_rank],dtype=input.dtype,requires_grad=True)
-
-    if local_rank == 0:
-        print("input shape: ", input.shape,"recvbuf shape: ", recvbuf.shape, "scounts: ", scounts, "sdispls: ", sdispls)
-    else:
-        print("input shape: ", input.shape,"recvbuf shape: ", recvbuf.shape)
-
-    recvbuf = comm.as_buffer(recvbuf)
-    recvbuf = recvbuf[0].view_as(split_tensors[local_rank])
-    MPI.COMM_WORLD.Scatterv(sendbuf, recvbuf, root=0)
-    # comm.Scatterv(sendbuf, recvbuf, root=0)
-    # raise NotImplementedError("This function is not debugged yet.")
-    return recvbuf
-
-def ScatterVWrapperV1_5(input,mp_size):
-    rank = comm.rank
-    split_tensors = split_tensor_along_dim(input, 3, mp_size)
-    local_rank = rank%mp_size
-
-    if local_rank == 0:
-        scounts = tuple([t.numel() for t in split_tensors])
-        sdispls = tuple([0] + [sum(scounts[:i]) for i in range(1, len(scounts))])
-        sendbuf = comm.as_buffer(input,scounts,sdispls)
-    else:
-        sendbuf = None
-
-    recvbuf = torch.zeros_like(split_tensors[local_rank],dtype=input.dtype,requires_grad=True)
-
-    if local_rank == 0:
-        print("input shape: ", input.shape,"recvbuf shape: ", recvbuf.shape, "scounts: ", scounts, "sdispls: ", sdispls)
-    else:
-        print("input shape: ", input.shape,"recvbuf shape: ", recvbuf.shape)
-        
-    recvbuf = comm.as_buffer(recvbuf)
-    comm.Scatterv(sendbuf, recvbuf, root=0)
-    # comm.Scatterv(sendbuf, recvbuf, root=0)
-    recvbuf = recvbuf[0].view_as(split_tensors[local_rank])
-    # raise NotImplementedError("This function is not debugged yet.")
-    return recvbuf
-
 def ScatterVWrapperV2(input,mp_size):
     rank = comm.rank
     local_rank = rank%mp_size
 
-    split_tensors = split_tensor_along_dim(input, 3, mp_size)
-    recvbuf = torch.zeros_like(split_tensors[local_rank],requires_grad=True)
-    comm.Scatterv(input, recvbuf, root=rank-rank%mp_size,axis=3)
-    recvbuf = recvbuf[0].view_as(split_tensors[local_rank])
-
+    rearranged_input = input.permute(3,0,1,2)
+    if rank == 0 and DEBUG:
+        print("Scatter rearranged_input shape: ", rearranged_input.shape)
+        print("Scatter input shape: ", input.shape)
+    rearranged_input = rearranged_input.contiguous()
+    
+    split_tensors = split_tensor_along_dim(rearranged_input, 0, mp_size)
+    recvbuf = torch.zeros(split_tensors[local_rank].shape,device=input.device,dtype=input.dtype,requires_grad=True)
+    comm.Scatterv(rearranged_input, recvbuf, root=rank-rank%mp_size,axis=0)
+    
+    recvbuf_orig_shape = recvbuf.permute(1,2,3,0)
+    recvbuf_orig_shape = recvbuf_orig_shape.contiguous()
+    if rank == 0 and DEBUG:
+        print("Scatter split_tensors shape: ", split_tensors[local_rank].shape)
+        print("Scatter recvbuf_orig_shape shape: ", recvbuf_orig_shape.shape)
+        print("Scatter recvbuf shape: ", recvbuf.shape)
     # comm.Scatterv(input, recvbuf.data_ptr(), root=rank-rank%mp_size,axis=3)
-    return recvbuf
-
-def AllGatherVWrapperV1(input,mp_size):
-    #create recvbuf tensor from input tensor size with dim=3 times mp_size
-    #create sendbuf tensor from input tensor
-    #allgather input tensor to all ranks
-    #turn recvbuf into tensor
-    #return tensor
-    shape = list(input.shape)
-    shape[3] = 768
-    sendbuf = comm.as_buffer(input)
-    recvbuf = torch.zeros(shape, dtype=input.dtype)
-    
-    rank = comm.rank
-    elements = [0] * mp_size
-    elements[rank%mp_size] = input.numel()
-    comm.Allgather(MPI.IN_PLACE, [elements, MPI.INT])
-    displs = [0] + [sum(elements[:i]) for i in range(1, len(elements))]
-    
-    recvbuf, counts, dtype = comm.as_buffer(recvbuf, elements, displs)
-    
-    MPI.COMM_WORLD.Allgatherv(sendbuf, [recvbuf, counts, dtype])
-    # comm.Allgatherv(sendbuf, [recvbuf, counts, dtype])
-    return recvbuf
+    return recvbuf_orig_shape
 
 def AllGatherVWrapperV2(input,mp_size):
-    shape = list(input.shape)
-    shape[3] = 768
-    recvbuf = torch.empty(shape, dtype=input.dtype, device=input.device, requires_grad=True)
-    comm.Allgatherv(input, recvbuf, recv_axis=3)
-    return recvbuf
+    rank = comm.rank
+    rearranged_input = input.permute(3,0,1,2)
+    rearranged_input = rearranged_input.contiguous()
+    if rank == 0 and DEBUG:
+        print("Gather rearranged_input shape: ", rearranged_input.shape)
+        print("Gather input shape: ", input.shape)
+    shape = list(rearranged_input.shape)
+    shape[0] = 768
+    
+    recvbuf = torch.zeros(shape, dtype=input.dtype, device=input.device, requires_grad=True)
+    comm.Allgatherv(rearranged_input, recvbuf, recv_axis=0)
+    
+    rearranged_recvbuf = recvbuf.permute(1,2,3,0)
+    rearranged_recvbuf = rearranged_recvbuf.contiguous()
+    
+    if rank == 0 and DEBUG:
+        print("Gather rearranged_recvbuf shape: ", rearranged_recvbuf.shape)
+        print("Gather recvbuf shape: ", recvbuf.shape)
+    return rearranged_recvbuf
 
 
 class ScatterGather(torch.autograd.Function):
@@ -397,8 +346,8 @@ class AFNONetMPDP(nn.Module):
         self.head_is_synced = False
         self.params = params
         mp_size = params.mp_size
-        # global mp_group
-        # mp_group = create_mp_comm_group(mp_size)
+        global mp_group
+        mp_group = create_mp_comm_group(mp_size)
         self.img_size = img_size
         self.patch_size = (params.patch_size, params.patch_size)
         self.in_chans = params.N_in_channels
@@ -460,7 +409,12 @@ class AFNONetMPDP(nn.Module):
     def forward(self, x):
         global compute_time, comm_time
         start_time = time.time()
+        shape_before = x.shape
         x = self.forward_features(x)
+        if DEBUG:
+            print("x.shape before forward_features:", shape_before)
+            print("x reshaped in forward_features before blocks to:", shape_before[0], self.h, self.w, self.embed_dim)
+            print("x.shape after forward_features:", x.shape)
         if not self.head_is_synced:
             start_comm_time = time.time()
             self.head_is_synced = True
@@ -479,6 +433,8 @@ class AFNONetMPDP(nn.Module):
             h=self.img_size[0] // self.patch_size[0],
             w=self.img_size[1] // self.patch_size[1],
         )
+        if DEBUG:
+            print("x.shape rearraged after head from 'b h w (p1 p2 c_out)' to 'b c_out (h p1) (w p2)':", x.shape)
         compute_time += time.time() - start_time
         global FLAG
         if FLAG == 0:

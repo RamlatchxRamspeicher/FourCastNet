@@ -335,9 +335,9 @@ class Trainer():
 
     if dist.is_initialized():
       for key in sorted(logs.keys()):
-        send_tensor = logs[key].detach()/self.params.mp_size
-        comm.Allreduce(send_tensor,logs[key])
-        logs[key] = float(logs[key]/(comm.size/self.params.mp_size))
+        send_tensor = logs[key].detach()
+        dp_group.Allreduce(send_tensor,logs[key])
+        logs[key] = float(logs[key]/(dp_group.size))
 
     if self.params.log_to_wandb:
       wandb.log(logs, step=self.epoch)
@@ -428,9 +428,9 @@ class Trainer():
            
     if dist.is_initialized():
       send_buff = valid_buff.clone()
-      comm.Allreduce(send_buff,valid_buff, op=MPI.SUM) #Added by Robin Maurer
+      dp_group.Allreduce(send_buff,valid_buff, op=MPI.SUM) #Added by Robin Maurer
       send_buff = valid_weighted_rmse.clone()
-      comm.Allreduce(send_buff,valid_weighted_rmse, op=MPI.SUM) #Added by Robin Maurer
+      dp_group.Allreduce(send_buff,valid_weighted_rmse, op=MPI.SUM) #Added by Robin Maurer
 
       # dist.all_reduce(valid_buff)
       # dist.all_reduce(valid_weighted_rmse)
@@ -564,6 +564,16 @@ class Trainer():
     if self.params.resuming:  #restore checkpoint is used for finetuning as well as resuming. If finetuning (i.e., not resuming), restore checkpoint does not load optimizer state, instead uses config specified lr.
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
+
+def create_mp_comm_group(mp_size):
+    comm = MPI.COMM_WORLD
+    world_size = comm.Get_size()
+    rank = comm.Get_rank()
+    for i in range(world_size):
+        if i%mp_size == 0:
+            comm_group = comm.group.Incl([i for i in range(i,i+mp_size)])
+    return MPICommunication(comm.Create_group(comm_group))
+
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
   parser.add_argument("--run_num", default='00', type=str)
@@ -658,7 +668,8 @@ if __name__ == '__main__':
       yaml.dump(hparams,  hpfile )
   mp_size = params['mp_size']  ### Added by Robin Maurer
   # print(world_rank)
-  DEBUGPRINT = True
+  DEBUGPRINT = False
+  dp_group = create_mp_comm_group(mp_size)  ### Added by Robin Maurer
   trainer = Trainer(params, world_rank)
   trainer.train()
   logging.info('DONE ---- rank %d'%world_rank)

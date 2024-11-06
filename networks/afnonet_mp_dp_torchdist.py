@@ -33,16 +33,83 @@ FLAG = 0
 
 # create comm group depending on world size and mp parallel size
 mp_group = None
+dp_group = None
 compute_time = 0
 comm_time = 0
 
+def create_dp_group(mp_size):
+    global dp_group
+    ranks = []
+    for i in range(MPI.COMM_WORLD.Get_size()):
+        if i%mp_size == 0:
+            ranks.append(i)
+    dp_group = dist.new_group(ranks=ranks,backend="nccl", group_desc="dp_group")### Added by Robin Maurer
 
-
-def create_dist_group(mp_size):
+def create_mp_group(mp_size):
     global mp_group
     rank = dist.get_rank()
     #if rank % mp_size == 0:
     mp_group = dist.new_group(ranks=[i for i in range(rank-rank%mp_size, rank-rank%mp_size+mp_size)],backend="nccl", group_desc="mp_group")
+
+
+
+def allreduceWrapper(input, mp_size):
+    dp_size= dist.get_world_size()//mp_size
+    dist.all_reduce(input, op=dist.ReduceOp.SUM,group=dp_group)
+    input /= dp_size
+    return input
+
+def broadcastWrapper(input, mp_size):
+    if mp_size > 1:
+        dist.broadcast(input, src=0, group=mp_group)
+    return input
+
+def scatterWrapper(input, mp_size, rank):
+    rearranged_input = input.permute(3,0,1,2)
+    rearranged_input = rearranged_input.contiguous()
+    src = rank - rank % mp_size
+    local_rank = rank % mp_size
+    
+    split_tensors = list(torch.chunk(rearranged_input, mp_size, dim=0))
+    received_tensor = torch.zeros(split_tensors[local_rank].shape,dtype=input.dtype,device=input.device,requires_grad=True)
+    
+    dist.scatter(received_tensor,split_tensors if src == rank else None, src=src,group=mp_group)
+    
+    received_tensor_orig_shape = received_tensor.permute(1,2,3,0)
+    received_tensor_orig_shape = received_tensor_orig_shape.contiguous()
+    return received_tensor_orig_shape
+
+def gatherWrapper(input, mp_size, rank, device):
+    rearranged_input = input.permute(3,0,1,2)
+    rearranged_input = rearranged_input.contiguous()
+    
+    gathered_tensor_list = [
+        torch.zeros(rearranged_input.shape,dtype=input.dtype, device=input.device, requires_grad=True)
+        for _ in range(mp_size)]
+    dist.all_gather(gathered_tensor_list, rearranged_input, group=mp_group)
+    gathered_tensor = [t.to(device) for t in gathered_tensor_list]            
+    received_tensor = torch.cat(gathered_tensor, dim=0) if gathered_tensor is not None else None
+    gathered_tensor_orig_shape = received_tensor.permute(1,2,3,0).contiguous()
+    return gathered_tensor_orig_shape
+
+
+class AllReduceBcast(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input, mp_size):
+        ctx.mp_size = mp_size
+        return input
+        if dist.get_world_size() == 1:
+            return input
+        input = allreduceWrapper(input, mp_size)
+        return input
+    
+    def backward(ctx, grad_output):
+        if dist.get_world_size() == 1:
+            return grad_output
+        grad_output = broadcastWrapper(grad_output,ctx.mp_size)
+        return grad_output, None, None, None
+        
+    
 
 class ScatterGather(torch.autograd.Function):
     @staticmethod
@@ -55,10 +122,9 @@ class ScatterGather(torch.autograd.Function):
                 print("ScatterGather forward","Rank:", rank, "Input shape forward:", input.shape, "input device:", input.device, "input size in bytes:", 4*input.nelement(),"mp_size:",mp_size)
         ctx.device = input.device
         ctx.rank = rank
-        src = rank - rank % mp_size
-        split_tensors = list(torch.chunk(input, mp_size, dim=3))
-        received_tensor = torch.empty_like(split_tensors[0])
-        dist.scatter(received_tensor,split_tensors if src == rank else None, src=src,group=mp_group)
+        
+        received_tensor = scatterWrapper(input, mp_size, rank)
+        
         return received_tensor
 
     @staticmethod
@@ -72,11 +138,8 @@ class ScatterGather(torch.autograd.Function):
                 print("ScatterGather backward","Rank:", ctx.rank, "Input shape forward:", grad_output.shape, "input device:", grad_output.device, "input size in bytes:", 4*grad_output.nelement(),"mp_size:",ctx.mp_size)
 
         device = ctx.device
-        gathered_tensor = [torch.empty_like(grad_output) for _ in range(ctx.mp_size)]
-        dist.all_gather(gathered_tensor, grad_output,group=mp_group)
-        gathered_tensor = [t.to(device) for t in gathered_tensor]
-        grad_output = torch.cat(gathered_tensor, dim=3) if gathered_tensor is not None else None
-
+        grad_output = gatherWrapper(grad_output, ctx.mp_size, ctx.rank, device)
+        
         return grad_output, None, None, None
     
 class GatherScatter(torch.autograd.Function):
@@ -93,10 +156,8 @@ class GatherScatter(torch.autograd.Function):
         ctx.device=input.device
         ctx.rank = rank
         device = input.device
-        gathered_tensor = [torch.empty_like(input) for _ in range(mp_size)]
-        dist.all_gather(gathered_tensor,input,group=mp_group)
-        gathered_tensor = [t.to(device) for t in gathered_tensor]
-        input = torch.cat(gathered_tensor, dim=3) if gathered_tensor is not None else gathered_tensor
+        
+        input = gatherWrapper(input, mp_size, rank, device)
 
         return input
         
@@ -109,11 +170,9 @@ class GatherScatter(torch.autograd.Function):
                 print("GatherScatter backward","Rank:", ctx.rank, "Input shape forward:", grad_output.shape, "input device:", grad_output.device, "input size in bytes:", 4*grad_output.nelement(),"mp_size:",ctx.mp_size)
 
         src = ctx.rank - ctx.rank % ctx.mp_size
-        split_tensors = list(torch.chunk(grad_output, ctx.mp_size, dim=3))
-        received_tensor = torch.empty_like(split_tensors[0])
-        dist.scatter(received_tensor,split_tensors if src==ctx.rank else None, src=src,group=mp_group)
-
-        return received_tensor.to(ctx.device), None, None, None
+        
+        grad_output = scatterWrapper(grad_output, ctx.mp_size, ctx.rank)
+        return grad_output, None, None, None
         # return ctx.mp_group.scatter(grad_output, ctx.rank - ctx.rank % ctx.mp_size), None, None, None
 
 class Mlp(nn.Module):
@@ -258,8 +317,8 @@ class Block(nn.Module):
             #print(x.shape)
             # x = self.scatter_fn(x, self.mp_size, rank, mp_group)
             x = self.scatter_fn(x, self.mp_size, rank)
-            device = next(self.parameters()).device  # oder z.B. torch.device("cuda:0")
-            x = x.to(device)
+            # device = next(self.parameters()).device  # oder z.B. torch.device("cuda:0")
+            # x = x.to(device)
             comm_time += time.time() - start_time
 
             #print(x.shape)
@@ -324,8 +383,10 @@ class AFNONetMPDP(nn.Module):
         self.head_is_synced = False
         self.params = params
         mp_size = params.mp_size
-        global mp_group
-        mp_group = init_local_group(mp_size,1)
+        # global mp_group
+        # mp_group = init_local_group(mp_size,1)
+        create_mp_group(mp_size)
+        create_dp_group(mp_size)
         self.img_size = img_size
         self.patch_size = (params.patch_size, params.patch_size)
         self.in_chans = params.N_in_channels
@@ -339,6 +400,7 @@ class AFNONetMPDP(nn.Module):
 
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))
         self.pos_drop = nn.Dropout(p=drop_rate)
+        self.ddp_fn = AllReduceBcast.apply
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
 
@@ -406,6 +468,8 @@ class AFNONetMPDP(nn.Module):
             w=self.img_size[1] // self.patch_size[1],
         )
         compute_time += time.time() - start_time
+        if MPI.COMM_WORLD.Get_size()>self.params.mp_size:
+            x= self.ddp_fn(x, self.params.mp_size)
         global FLAG
         if FLAG == 0:
             print("Rank:", MPI.COMM_WORLD.Get_rank(),"Compute Time:", compute_time-comm_time,"Comm Time:", comm_time)

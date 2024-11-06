@@ -77,7 +77,6 @@ logging_utils.config_logger()
 from utils.YParams import YParams
 from utils.data_loader_multifiles import get_data_loader
 from networks.afnonet import AFNONet, PrecipNet
-from networks.afnonet_mp_v1 import AFNONetDist
 from networks.afnonet_mp_dp_torchdist import AFNONetMPDP
 from utils.img_utils import vis_precip
 import wandb
@@ -93,9 +92,27 @@ from ruamel.yaml.comments import CommentedMap as ruamelDict
 import perun
 
 
+def create_dp_group_for_rank():
+  ranks = []
+  for i in range(get_world_size()):
+    if i%params['mp_size'] == dist.get_rank()%params['mp_size']:
+      ranks.append(i)
+  dp_group = dist.new_group(ranks=ranks,backend="nccl", group_desc="dp_group")
+  return dp_group
+
+
+   
+        
 class Trainer():
   def count_parameters(self):
     return sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+  
+  def average_gradients(self):
+  # Average gradients across all processes
+    for param in self.model.parameters():
+        if param.requires_grad and param.grad is not None:
+          dist.all_reduce(param.grad, op=dist.ReduceOp.SUM, group=dp_group)
+          param.grad.div_(params['dp_size'])
 
   def __init__(self, params, world_rank):
     
@@ -109,7 +126,7 @@ class Trainer():
 
     logging.info('rank %d, begin data loader init'%world_rank)
     self.train_data_loader, self.train_dataset, self.train_sampler = get_data_loader(params, params.train_data_path, dist.is_initialized(), train=True, rank=world_rank-world_rank%params.mp_size if params.mp_size >1 else None, world_size=get_world_size()//params.mp_size)  ### Edited by Robin Maurer
-    self.valid_data_loader, self.valid_dataset = get_data_loader(params, params.valid_data_path, dist.is_initialized(), train=False)
+    self.valid_data_loader, self.valid_dataset = get_data_loader(params, params.valid_data_path, dist.is_initialized(), train=False, rank=world_rank-world_rank%params.mp_size if params.mp_size >1 else None, world_size=get_world_size()//params.mp_size)
     self.loss_obj = LpLoss()
     logging.info('rank %d, data loader initialized'%world_rank)
 
@@ -148,47 +165,6 @@ class Trainer():
 
     if params.nettype == 'afno':
       self.model = AFNONet(params).to(self.device)
-    elif params.nettype == 'afnodist':  ### Added by Robin Maurer
-      self.model = AFNONetDist(params).to(self.device)  ### Added by Robin Maurer
-    elif params.nettype == 'afnodist_mp':  ### Added by Robin Maurer
-      from torch.distributed.tensor.parallel import ColwiseParallel, RowwiseParallel, parallelize_module,PrepareModuleInput,SequenceParallel  ### Added by Robin Maurer
-      from torch.distributed.device_mesh import init_device_mesh  ### Added by Robin Maurer
-      from torch.distributed._tensor import Replicate, Shard  ### Added by Robin Maurer
-      tp_mesh = init_device_mesh("cuda", (params.world_size,))  ### Added by Robin Maurer
-
-      self.model = parallelize_module(AFNONet(params).to(self.device),  ### Added by Robin Maurer
-                                tp_mesh,
-                                {
-                                    # "patch_embed": RowwiseParallel(
-                                    #    input_layouts=Replicate(),
-                                    #    output_layouts=Shard(1),
-                                    # ),
-                                    # "pose_embed": RowwiseParallel(),
-                                    "norm": SequenceParallel(),
-                                    "head": ColwiseParallel(
-                                       input_layouts=Shard(3),
-                                       output_layouts=Replicate()
-                                    ),
-                                })
-      for layer_id, block in enumerate(self.model.blocks):  ### Added by Robin Maurer
-          layer_tp_plan = {  ### Added by Robin Maurer
-              "norm1": SequenceParallel(),
-              "filter": PrepareModuleInput(
-                 input_layouts=(Shard(3),),
-                 desired_input_layouts=(Replicate(),),
-              ),
-              "filter.w1": ColwiseParallel(),
-              "filter.w2": RowwiseParallel(output_layouts=Shard(3)),
-              "norm2": SequenceParallel(),
-              "mlp": PrepareModuleInput(
-                 input_layouts=(Shard(3),),
-                 desired_input_layouts=(Replicate(),),
-              ),
-              "mlp.fc1": ColwiseParallel(),
-              "mlp.fc2": RowwiseParallel(output_layouts=Shard(3)),
-          }
-          #TODO: do stuff here to use local size in block with x//tp_mesh.size()
-          parallelize_module(block, tp_mesh, layer_tp_plan)  ### Added by Robin Maurer
     elif params.nettype == 'afnodist_mp_dp':  ### Added by Robin Maurer
       self.model = AFNONetMPDP(params).to(self.device)  ### Added by Robin Maurer
     else:
@@ -313,9 +289,9 @@ class Trainer():
       # adjust_LR(optimizer, params, iters)
       data_start = time.time()
       inp, tar = map(lambda x: x.to(self.device, dtype = torch.float), data)      
+
       if self.params.orography and self.params.two_step_training:
           orog = inp[:,-2:-1] 
-
 
       if self.params.enable_nhwc:
         inp = inp.to(memory_format=torch.channels_last)
@@ -349,23 +325,28 @@ class Trainer():
               gen = self.model(inp).to(self.device, dtype = torch.float)
             loss = self.loss_obj(gen, tar)
             if flag:
-               logging.info("Loss: ", loss.item(), "rank:", self.world_rank)
+               logging.info(f"Loss: {loss.item()} rank: {self.world_rank}")
                flag = False
+
+
 
       if self.params.enable_amp:
         self.gscaler.scale(loss).backward()
+        self.average_gradients()
         self.gscaler.step(self.optimizer)
       else:
         loss.backward()
+        self.average_gradients()
         self.optimizer.step()
 
+      
       if self.params.enable_amp:
         self.gscaler.update()
 
       #if dist.get_rank() == 0: print("batch: ", i,"/",len(self.train_data_loader), "loss: ", loss.item(), "time taken: ", time.time()-tr_start)
 
       tr_time += time.time() - tr_start
-      if i < 10:
+      if i < 4:
         logging.info("Epoch: {}, Batch: {}, Loss: {}, Rank: {}".format(self.epoch, i, loss.item(), self.world_rank))
       if dist.get_rank() == 0 and i%(len(self.train_data_loader)//100)==0: logging.info(f"Progress of epoch: {i*100/len(self.train_data_loader)} %, batch: {i}/{len(self.train_data_loader)}") 
     
@@ -374,11 +355,10 @@ class Trainer():
     except:
         logs = {'loss': loss}
 
-    # if dist.is_initialized():
-    #   for key in sorted(logs.keys()):
-    #     logs[key] = logs[key]/mp_size
-    #     dist.group.WORLD.allreduce(logs[key].detach())  ### Edited by Robin Maurer
-    #     logs[key] = float(logs[key]/(get_world_size()/mp_size))   ### Edited by Robin Maurer
+    if dist.is_initialized():
+      for key in sorted(logs.keys()):
+        dist.all_reduce(logs[key].detach(),group=dp_group)  ### Edited by Robin Maurer
+        logs[key] = float(logs[key]/(get_world_size()))   ### Edited by Robin Maurer
 
     if self.params.log_to_wandb:
       wandb.log(logs, step=self.epoch)
@@ -468,11 +448,8 @@ class Trainer():
 
            
     if dist.is_initialized():
-      valid_buff[0] = valid_buff[0]/mp_size
-      valid_buff[1] = valid_buff[1]/mp_size
-      valid_weighted_rmse = valid_weighted_rmse/mp_size
-      dist.group.WORLD.allreduce(valid_buff)             ### Edited by Robin Maurer
-      dist.group.WORLD.allreduce(valid_weighted_rmse)    ### Edited by Robin Maurer
+      dist.all_reduce(valid_buff)             ### Edited by Robin Maurer
+      dist.all_reduce(valid_weighted_rmse)    ### Edited by Robin Maurer
 
     # divide by number of steps
     valid_buff[0:2] = valid_buff[0:2] / valid_buff[2]
@@ -629,7 +606,7 @@ if __name__ == '__main__':
   #   # local_rank = int(os.environ["LOCAL_RANK"])    ### Edited by Robin Maurer
   #   args.gpu = local_rank
   #   # world_rank = dist.get_rank()                  ### Edited by Robin Maurer
-  #   params['global_batch_size'] = params.batch_size
+  params['global_batch_size'] = params.batch_size * params.world_size ### Edited by Robin Maurer
   #   if params["nettype"] == "afnodist_mp_dp":  ### Added by Robin Maurer
   #     params['batch_size'] = int(params.batch_size//(params['world_size']//params['mp_size']))
   #   else:
@@ -662,7 +639,7 @@ if __name__ == '__main__':
   # this will be the wandb name
 #  params['name'] = args.config + '_' + str(args.run_num)
 #  params['group'] = "era5_wind" + args.config
-  params['name'] = args.config + '_' + str(args.run_num) + '_test_torchdist_' + str(params['nettype']) + '_mp' + str(params['mp_size']) 
+  params['name'] = args.config + '_' + str(args.run_num) + '_final_torch_batchsize_1_' + str(params['nettype']) + '_mp' + str(params['mp_size']) 
   # params['group'] = "era5_precip" + args.config
   params['project'] = "Masterthesis"
   params['entity'] = "ramlatch-karlsruhe-institute-of-technology"
@@ -691,6 +668,11 @@ if __name__ == '__main__':
     with open(os.path.join(expDir, 'hyperparams.yaml'), 'w') as hpfile:
       yaml.dump(hparams,  hpfile )
   mp_size = params['mp_size']  ### Added by Robin Maurer
+  ranks = []
+  for i in range(get_world_size()):
+    if i%mp_size == 0: ranks.append(i)
+  params['dp_size'] = len(ranks)  ### Added by Robin Maurer
+  dp_group = create_dp_group_for_rank()### Added by Robin Maurer
   # print(world_rank)
   trainer = Trainer(params, world_rank)
   trainer.train()

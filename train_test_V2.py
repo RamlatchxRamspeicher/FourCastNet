@@ -77,7 +77,6 @@ logging_utils.config_logger()
 from utils.YParams import YParams
 from utils.data_loader_multifiles import get_data_loader
 from networks.afnonet import AFNONet, PrecipNet
-from networks.afnonet_mp_v1 import AFNONetDist
 from networks.afnonet_mp_dp_test_V2 import AFNONetMPDP
 from utils.img_utils import vis_precip
 import wandb
@@ -111,8 +110,8 @@ class Trainer():
       # wandb.init(config=params, name=params.name, project=params.project, entity=params.entity)
 
     logging.info('rank %d, begin data loader init'%world_rank)
-    self.train_data_loader, self.train_dataset, self.train_sampler = get_data_loader(params, params.train_data_path, dist.is_initialized(), train=True, rank=world_rank-world_rank%params.mp_size if params.mp_size >1 else None, world_size=MPI.COMM_WORLD.Get_size()//params.mp_size)  ### Edited by Robin Maurer
-    self.valid_data_loader, self.valid_dataset = get_data_loader(params, params.valid_data_path, dist.is_initialized(), train=False)
+    self.train_data_loader, self.train_dataset, self.train_sampler = get_data_loader(params, params.train_data_path, distributed=True, train=True, rank=world_rank-world_rank%params.mp_size if params.mp_size >1 else None, world_size=MPI.COMM_WORLD.Get_size()//params.mp_size)  ### Edited by Robin Maurer
+    self.valid_data_loader, self.valid_dataset = get_data_loader(params, params.valid_data_path, distributed=True, train=False)
     self.loss_obj = LpLoss()
     logging.info('rank %d, data loader initialized'%world_rank)
 
@@ -337,7 +336,7 @@ class Trainer():
       for key in sorted(logs.keys()):
         send_tensor = logs[key].detach()/self.params.mp_size
         comm.Allreduce(send_tensor,logs[key])
-        logs[key] = float(logs[key]/(comm.size/self.params.mp_size))
+        logs[key] = float(logs[key]/(comm.size))
 
     if self.params.log_to_wandb:
       wandb.log(logs, step=self.epoch)
@@ -576,7 +575,7 @@ if __name__ == '__main__':
 
   params = YParams(os.path.abspath(args.yaml_config), args.config)
   params['epsilon_factor'] = args.epsilon_factor
-  if MPI.COMM_WORLD.Get_size() > 8:  ### Added by Robin Maurer
+  if MPI.COMM_WORLD.Get_size() > 1:  ### Added by Robin Maurer
     from utils.comm import init, get_local_rank, get_world_rank, get_world_size  ### Added by Robin Maurer
     init("nccl-slurm")  ### Added by Robin Maurer
     params['world_size'] = get_world_size()  ### Added by Robin Maurer
