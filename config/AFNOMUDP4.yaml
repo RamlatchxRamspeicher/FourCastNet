@@ -64,7 +64,7 @@ afno_backbone: &backbone
   <<: *FULL_FIELD
   log_to_wandb: !!bool True
   lr: 5E-4
-  batch_size: 1
+  batch_size: 4
   max_epochs: 150
   scheduler: 'CosineAnnealingLR'
   in_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
@@ -78,7 +78,7 @@ afno_backbone: &backbone
   time_means_path:   '/hkfs/work/workspace/scratch/ie5012-MA/data/stats/time_means.npy'
   global_means_path: '/hkfs/work/workspace/scratch/ie5012-MA/data/stats/global_means.npy'
   global_stds_path:  '/hkfs/work/workspace/scratch/ie5012-MA/data/stats/global_stds.npy'
-  group: 'Final_Torch_batchsize_1'
+  group: 'Final_Torch_batchsize_flex'
 
 
 afno_backbone_orography: &backbone_orography 

@@ -36,6 +36,7 @@ mp_group = None
 dp_group = None
 compute_time = 0
 comm_time = 0
+reformat_time = 0
 
 def create_dp_group(mp_size):
     global dp_group
@@ -53,43 +54,56 @@ def create_mp_group(mp_size):
 
 
 
-def allreduceWrapper(input, mp_size):
+def allreduceWrapper(input:torch.Tensor, mp_size):
     dp_size= dist.get_world_size()//mp_size
     dist.all_reduce(input, op=dist.ReduceOp.SUM,group=dp_group)
-    input /= dp_size
-    return input
+    ret = torch.div(input,dp_size)
+    return ret
 
 def broadcastWrapper(input, mp_size):
     if mp_size > 1:
-        dist.broadcast(input, src=0, group=mp_group)
+        rank = dist.get_rank()
+        src = rank - rank % mp_size
+        dist.broadcast(input, src=src, group=mp_group)
     return input
 
 def scatterWrapper(input, mp_size, rank):
+    global comm_time, reformat_time                     ## Time measurement
+    re_start_time = time.time()                         ## Time measurement
     rearranged_input = input.permute(3,0,1,2)
     rearranged_input = rearranged_input.contiguous()
+    reformat_time += time.time() - re_start_time        ## Time measurement
     src = rank - rank % mp_size
     local_rank = rank % mp_size
     
     split_tensors = list(torch.chunk(rearranged_input, mp_size, dim=0))
     received_tensor = torch.zeros(split_tensors[local_rank].shape,dtype=input.dtype,device=input.device,requires_grad=True)
-    
+    comm_start_time = time.time()                       ## Time measurement
     dist.scatter(received_tensor,split_tensors if src == rank else None, src=src,group=mp_group)
-    
+    comm_time += time.time() - comm_start_time          ## Time measurement
+    re_start_time = time.time()                         ## Time measurement
     received_tensor_orig_shape = received_tensor.permute(1,2,3,0)
     received_tensor_orig_shape = received_tensor_orig_shape.contiguous()
+    reformat_time += time.time() - re_start_time        ## Time measurement
     return received_tensor_orig_shape
 
 def gatherWrapper(input, mp_size, rank, device):
+    global comm_time, reformat_time
+    re_start_time = time.time()                         ## Time measurement
     rearranged_input = input.permute(3,0,1,2)
     rearranged_input = rearranged_input.contiguous()
-    
+    reformat_time += time.time() - re_start_time        ## Time measurement
     gathered_tensor_list = [
         torch.zeros(rearranged_input.shape,dtype=input.dtype, device=input.device, requires_grad=True)
         for _ in range(mp_size)]
+    comm_start_time = time.time()                       ## Time measurement
     dist.all_gather(gathered_tensor_list, rearranged_input, group=mp_group)
+    comm_time += time.time() - comm_start_time          ## Time measurement
     gathered_tensor = [t.to(device) for t in gathered_tensor_list]            
     received_tensor = torch.cat(gathered_tensor, dim=0) if gathered_tensor is not None else None
+    re_start_time = time.time()                         ## Time measurement
     gathered_tensor_orig_shape = received_tensor.permute(1,2,3,0).contiguous()
+    reformat_time += time.time() - re_start_time        ## Time measurement
     return gathered_tensor_orig_shape
 
 
@@ -313,13 +327,11 @@ class Block(nn.Module):
         rank = MPI.COMM_WORLD.Get_rank()
         # mp_group = create_mp_comm_group(self.mp_size)
         if not self.input_parallel:
-            start_time = time.time()
             #print(x.shape)
             # x = self.scatter_fn(x, self.mp_size, rank, mp_group)
             x = self.scatter_fn(x, self.mp_size, rank)
             # device = next(self.parameters()).device  # oder z.B. torch.device("cuda:0")
             # x = x.to(device)
-            comm_time += time.time() - start_time
 
             #print(x.shape)
         residual = x
@@ -335,11 +347,9 @@ class Block(nn.Module):
         x = self.drop_path(x)
         x = x + residual
         if not self.output_parallel:
-            start_time = time.time()
             #print(x.shape)
             # x = self.gather_fn(x, self.mp_size, rank, mp_group)
             x = self.gather_fn(x, self.mp_size, rank)
-            comm_time += time.time() - start_time
             #print(x.shape)
         return x
 
@@ -383,10 +393,13 @@ class AFNONetMPDP(nn.Module):
         self.head_is_synced = False
         self.params = params
         mp_size = params.mp_size
-        # global mp_group
-        # mp_group = init_local_group(mp_size,1)
-        create_mp_group(mp_size)
-        create_dp_group(mp_size)
+        global mp_group
+        mp_group = init_local_group(mp_size,1)
+        self.compute_time = 0
+        self.comm_time = 0
+        self.reformat_time = 0
+        #create_mp_group(mp_size)
+        #create_dp_group(mp_size)
         self.img_size = img_size
         self.patch_size = (params.patch_size, params.patch_size)
         self.in_chans = params.N_in_channels
@@ -447,12 +460,15 @@ class AFNONetMPDP(nn.Module):
         return x
 
     def forward(self, x):
-        global compute_time, comm_time
+        global compute_time, comm_time, reformat_time
+        compute_time = 0
+        comm_time = 0
+        reformat_time = 0
         start_time = time.time()
         x = self.forward_features(x)
         if not self.head_is_synced:
-            start_comm_time = time.time()
             self.head_is_synced = True
+            start_comm_time = time.time()
             for param in self.head.parameters():
                 dist.broadcast(
                     param, 0, group=None
@@ -468,12 +484,15 @@ class AFNONetMPDP(nn.Module):
             w=self.img_size[1] // self.patch_size[1],
         )
         compute_time += time.time() - start_time
-        if MPI.COMM_WORLD.Get_size()>self.params.mp_size:
-            x= self.ddp_fn(x, self.params.mp_size)
+        # if MPI.COMM_WORLD.Get_size()>self.params.mp_size:
+        #     x= self.ddp_fn(x, self.params.mp_size)
         global FLAG
         if FLAG == 0:
             print("Rank:", MPI.COMM_WORLD.Get_rank(),"Compute Time:", compute_time-comm_time,"Comm Time:", comm_time)
             FLAG = 1
+        self.compute_time += compute_time-comm_time-reformat_time
+        self.comm_time += comm_time
+        self.reformat_time += reformat_time
         return x
 
 

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash 
 
-#SBATCH --time=30:00:00
+#SBATCH --time=17:00:00
 #SBATCH --gres=gpu:4
 #SBATCH --nodes=16
 #SBATCH --ntasks-per-node=4
 
-#SBATCH -J 1MP_Finetune
-#SBATCH --output="/hkfs/work/workspace/scratch/ie5012-MA/results/241023/fcn_mpdp_1_finetune.out"
+#SBATCH -J 1MP_Torch
+#SBATCH --output="/hkfs/work/workspace/scratch/ie5012-MA/results/241127/torch/fcn_mpdp_1.out"
 #SBATCH -p accelerated
 #SBATCH --mem=501600mb
 #SBATCH --mail-type=ALL
@@ -15,9 +15,9 @@ ml purge
 ml restore MA41
 
 BASE_DIR="/hkfs/work/workspace/scratch/ie5012-MA"
-config_file="${BASE_DIR}/FourCastNet/config/AFNOMUDP1.yaml"
+config_file="${BASE_DIR}/FourCastNet/config/AFNOMUDPScalingExp.yaml"
 # config="afno_backbone" 
-config="afno_backbone_finetune" 
+config="afno_backbone" 
 run_num="0"
 
 export HDF5_USE_FILE_LOCKING=FALSE
@@ -33,7 +33,7 @@ export WANDB_API_KEY=239f4e150ee486bc13a02cacd1c44c40d8556b73
 # )
 
 
-TRAIN_FILE="$BASE_DIR/FourCastNet/train.py"
+TRAIN_FILE="$BASE_DIR/FourCastNet/train.torchdist.py"
 DDP_VARS="$BASE_DIR/FourCastNet/export_DDP_vars.sh"
 
 source $BASE_DIR/.venvs/Fourcastv2/bin/activate

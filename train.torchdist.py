@@ -62,9 +62,6 @@ import numpy as np
 import argparse
 import h5py
 import torch
-import cProfile
-import re
-import torchvision
 from torchvision.utils import save_image
 import torch.nn as nn
 import torch.amp as amp
@@ -84,12 +81,9 @@ from utils.weighted_acc_rmse import weighted_acc, weighted_rmse, weighted_rmse_t
 from utils.darcy_loss import LpLoss
 import matplotlib.pyplot as plt
 from collections import OrderedDict
-import pickle
 DECORRELATION_TIME = 36 # 9 days
-import json
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap as ruamelDict
-import perun
 
 
 def create_dp_group_for_rank():
@@ -100,7 +94,7 @@ def create_dp_group_for_rank():
   dp_group = dist.new_group(ranks=ranks,backend="nccl", group_desc="dp_group")
   return dp_group
 
-
+comm_grad_time = 0
    
         
 class Trainer():
@@ -109,9 +103,13 @@ class Trainer():
   
   def average_gradients(self):
   # Average gradients across all processes
+    global comm_grad_time
+    comm_grad_time= 0
     for param in self.model.parameters():
         if param.requires_grad and param.grad is not None:
+          start_time = time.time()    ## time measurement
           dist.all_reduce(param.grad, op=dist.ReduceOp.SUM, group=dp_group)
+          comm_grad_time += time.time() - start_time ##time measurement
           param.grad.div_(params['dp_size'])
 
   def __init__(self, params, world_rank):
@@ -186,7 +184,7 @@ class Trainer():
     if params.enable_amp == True:
       self.gscaler = amp.GradScaler("cuda")
 
-    if dist.is_initialized() and (params.nettype not in ['afnodist',"afnodist_mp","afnodist_mp_dp"] or params.mp_size == 1):  ### Edited by Robin Maurer
+    if dist.is_initialized() and params.mp_size == 1: #(params.nettype not in ['afnodist',"afnodist_mp","afnodist_mp_dp"] or  ### Edited by Robin Maurer
       self.model = DistributedDataParallel(self.model,
                                            device_ids=[params.local_rank],
                                            output_device=[params.local_rank],find_unused_parameters=True)
@@ -332,14 +330,16 @@ class Trainer():
 
       if self.params.enable_amp:
         self.gscaler.scale(loss).backward()
+        dist.barrier()  ### Edited by Robin Maurer 
         self.average_gradients()
         self.gscaler.step(self.optimizer)
       else:
         loss.backward()
+        dist.barrier()  ### Edited by Robin Maurer
         self.average_gradients()
         self.optimizer.step()
-
-      
+      if type(self.model) != DistributedDataParallel:
+        self.model.comm_time += comm_grad_time      
       if self.params.enable_amp:
         self.gscaler.update()
 
@@ -355,10 +355,19 @@ class Trainer():
     except:
         logs = {'loss': loss}
 
+    #time measurement
+    if type(self.model) == AFNONetMPDP:
+      logs['compute_time'] = self.model.compute_time
+      logs['comm_time'] = self.model.comm_time
+      logs['reformat_time'] = self.model.reformat_time
+
     if dist.is_initialized():
       for key in sorted(logs.keys()):
-        dist.all_reduce(logs[key].detach(),group=dp_group)  ### Edited by Robin Maurer
-        logs[key] = float(logs[key]/(get_world_size()))   ### Edited by Robin Maurer
+        try:
+          dist.all_reduce(logs[key].detach(),op=dist.ReduceOp.AVG,group=dp_group)  ### Edited by Robin Maurer
+        except:
+          dist.all_reduce(logs[key],op=dist.ReduceOp.AVG,group=dp_group)
+        # logs[key] = float(logs[key]/(get_world_size())/mp_size)   ### Edited by Robin Maurer
 
     if self.params.log_to_wandb:
       wandb.log(logs, step=self.epoch)
@@ -476,6 +485,19 @@ class Trainer():
         fig = vis_precip(fields)
         logs['vis'] = wandb.Image(fig)
         plt.close(fig)
+      elif self.epoch % 10 == 0:
+        concat_image_cpu = torch.cat((gen[0,0], torch.zeros((self.valid_dataset.img_shape_x, 4)).to(self.device, dtype=torch.float), tar[0,0]), axis=1).detach().cpu().numpy()
+        normalized_concat_image = (concat_image_cpu - np.min(concat_image_cpu))/(np.max(concat_image_cpu) - np.min(concat_image_cpu))*255
+        normalized_concat_image = np.uint8(normalized_concat_image)
+        pred, tar = normalized_concat_image
+        fig, ax = plt.subplots(1, 2, figsize=(24,12))
+        ax[0].imshow(pred, cmap="coolwarm")
+        ax[0].set_title("tp pred")
+        ax[1].imshow(tar, cmap="coolwarm")
+        ax[1].set_title("tp tar")
+        fig.tight_layout()
+        logs[f'vis_epoch_{self.epoch}'] = wandb.Image(fig)
+        plt.close(fig)
       wandb.log(logs, step=self.epoch)
 
     return valid_time, logs
@@ -592,7 +614,7 @@ if __name__ == '__main__':
 
   params = YParams(os.path.abspath(args.yaml_config), args.config)
   params['epsilon_factor'] = args.epsilon_factor
-  from utils.comm import init, get_local_rank, get_world_rank, get_world_size  ### Added by Robin Maurer
+  from utils.comm import init, get_local_rank, get_world_rank, get_world_size, init_local_group  ### Added by Robin Maurer
   init("nccl-slurm")#,batchnorm_group_size=params["mp_size"])  ### Added by Robin Maurer
   params['world_size'] = get_world_size()  ### Added by Robin Maurer
   # if 'WORLD_SIZE' in os.environ:    ### Edited by Robin Maurer
@@ -615,7 +637,10 @@ if __name__ == '__main__':
     
 
   #print(params.batch_size)
-  torch.cuda.set_device(local_rank)
+  # try:
+  #   torch.cuda.device(local_rank)
+  # except:
+  #   logging.WARNING("Could not set device to local rank") 
   torch.backends.cudnn.benchmark = True
 
   # Set up directory
@@ -639,7 +664,7 @@ if __name__ == '__main__':
   # this will be the wandb name
 #  params['name'] = args.config + '_' + str(args.run_num)
 #  params['group'] = "era5_wind" + args.config
-  params['name'] = args.config + '_' + str(args.run_num) + '_final_torch_batchsize_1_' + str(params['nettype']) + '_mp' + str(params['mp_size']) 
+  params['name'] = args.config + '_' + str(args.run_num) + '_' + str(params['nettype']) + '_mp' + str(params['mp_size']) 
   # params['group'] = "era5_precip" + args.config
   params['project'] = "Masterthesis"
   params['entity'] = "ramlatch-karlsruhe-institute-of-technology"
@@ -672,7 +697,8 @@ if __name__ == '__main__':
   for i in range(get_world_size()):
     if i%mp_size == 0: ranks.append(i)
   params['dp_size'] = len(ranks)  ### Added by Robin Maurer
-  dp_group = create_dp_group_for_rank()### Added by Robin Maurer
+  # dp_group = create_dp_group_for_rank()### Added by Robin Maurer
+  dp_group = init_local_group(get_world_size()//mp_size,mp_size)### Added by Robin Maurer
   # print(world_rank)
   trainer = Trainer(params, world_rank)
   trainer.train()

@@ -5,8 +5,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=4
 
-#SBATCH -J v1_4
-#SBATCH --output="/hkfs/work/workspace/scratch/ie5012-MA/.spike/results/301026/MPI_v1_4.out"
+#SBATCH -J v2_4
+#SBATCH --output="/hkfs/work/workspace/scratch/ie5012-MA/.spike/results/241101/MPI_v2_4_distdataloader.out"
 #SBATCH -p accelerated
 #SBATCH --mem=501600mb
 #SBATCH --mail-type=NONE
@@ -17,7 +17,7 @@ ml restore MA41
 BASE_DIR="/hkfs/work/workspace/scratch/ie5012-MA"
 config_file="${BASE_DIR}/FourCastNet/config/AFNOMUDP_Devel.yaml"
 config="afno_backbone_four" 
-run_num="3"
+run_num="4"
 
 export HDF5_USE_FILE_LOCKING=FALSE
 export NCCL_NET_GDR_LEVEL=PHB
@@ -31,7 +31,7 @@ export WANDB_API_KEY=239f4e150ee486bc13a02cacd1c44c40d8556b73
 # )
 
 
-TRAIN_FILE="$BASE_DIR/FourCastNet/train_test.py"
+TRAIN_FILE="$BASE_DIR/FourCastNet/train_test_V2.py"
 DDP_VARS="$BASE_DIR/FourCastNet/export_DDP_vars.sh"
 
 source $BASE_DIR/.venvs/Fourcastv2/bin/activate

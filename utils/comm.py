@@ -138,7 +138,7 @@ def init_local_group(batchnorm_group_size, batchnorm_group_stride=1):
                 end = start + batchnorm_group_size * batchnorm_group_stride
                 ranks = list(range(start, end, batchnorm_group_stride))
                 local_groups.append(ranks)
-                tmp_group = dist.new_group(ranks=ranks, group_desc="mp_group")
+                tmp_group = dist.new_group(ranks=ranks)
                 if my_rank in ranks:
                     local_group = tmp_group
     return local_group
@@ -303,8 +303,8 @@ def init(method, ranks_per_gpu=1, batchnorm_group_size=1, batchnorm_group_stride
 
     elif method == "nccl-slurm":
         print(os.environ["CUDA_VISIBLE_DEVICES"])
-        print(f"device count: {torch.cuda.device_count()}, device number: {comm_rank % 4}")
-        torch.cuda.set_device(comm_rank % 4)
+        print(f"device count: {torch.cuda.device_count()}, device number: {comm_rank % torch.cuda.device_count()}")
+        torch.cuda.set_device(comm_rank % torch.cuda.device_count())
         time.sleep(0.01 * comm_rank)
 
         wireup_store = dist.TCPStore(
