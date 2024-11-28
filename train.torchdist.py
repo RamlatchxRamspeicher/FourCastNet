@@ -486,16 +486,18 @@ class Trainer():
         logs['vis'] = wandb.Image(fig)
         plt.close(fig)
       elif self.epoch % 10 == 0:
-        concat_image_cpu = torch.cat((gen[0,0], torch.zeros((self.valid_dataset.img_shape_x, 4)).to(self.device, dtype=torch.float), tar[0,0]), axis=1).detach().cpu().numpy()
-        normalized_concat_image = (concat_image_cpu - np.min(concat_image_cpu))/(np.max(concat_image_cpu) - np.min(concat_image_cpu))*255
-        normalized_concat_image = np.uint8(normalized_concat_image)
-        pred, tar = normalized_concat_image
-        fig, ax = plt.subplots(1, 2, figsize=(24,12))
-        ax[0].imshow(pred, cmap="coolwarm")
-        ax[0].set_title("tp pred")
-        ax[1].imshow(tar, cmap="coolwarm")
-        ax[1].set_title("tp tar")
-        fig.tight_layout()
+        fields = [gen[0,0].detach().cpu().numpy(), tar[0,0].detach().cpu().numpy()]
+        fig = vis_precip(fields)
+        # concat_image_cpu = torch.cat((gen[0,0].detach().cpu().numpy(), torch.zeros((self.valid_dataset.img_shape_x, 4)).to(self.device, dtype=torch.float), tar[0,0].detach().cpu().numpy()), axis=1)
+        # normalized_concat_image = (concat_image_cpu - np.min(concat_image_cpu))/(np.max(concat_image_cpu) - np.min(concat_image_cpu))*255
+        # normalized_concat_image = np.uint8(normalized_concat_image)
+        # pred, tar = normalized_concat_image
+        # fig, ax = plt.subplots(1, 2, figsize=(24,12))
+        # ax[0].imshow(pred, cmap="coolwarm")
+        # ax[0].set_title("tp pred")
+        # ax[1].imshow(tar, cmap="coolwarm")
+        # ax[1].set_title("tp tar")
+        # fig.tight_layout()
         logs[f'vis_epoch_{self.epoch}'] = wandb.Image(fig)
         plt.close(fig)
       wandb.log(logs, step=self.epoch)
