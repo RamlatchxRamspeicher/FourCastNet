@@ -256,7 +256,7 @@ class Trainer():
           lr = pg['lr']
         wandb.log({'lr': lr})
 
-      if self.world_rank == 0:
+      if self.world_rank in range(params['mp_size']):
         if self.params.save_checkpoint:
           #checkpoint at the end of every epoch
           self.save_checkpoint(self.params.checkpoint_path)
