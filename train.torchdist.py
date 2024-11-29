@@ -155,7 +155,8 @@ class Trainer():
                                             output_device=[params.local_rank],find_unused_parameters=True)
       self.load_model_wind(params.model_wind_path)
       self.switch_off_grad(self.model_wind) # no backprop through the wind model
-
+    # else:
+      #  logging.info("Not using a wind model")
 
     # reset out_channels for precip models
     if self.precip:
@@ -183,11 +184,13 @@ class Trainer():
 
     if params.enable_amp == True:
       self.gscaler = amp.GradScaler("cuda")
-
-    if dist.is_initialized() and params.mp_size == 1: #(params.nettype not in ['afnodist',"afnodist_mp","afnodist_mp_dp"] or  ### Edited by Robin Maurer
+    # logging.info(params['mp_size'])
+    if dist.is_initialized() and params["mp_size"] == 1: #(params.nettype not in ['afnodist',"afnodist_mp","afnodist_mp_dp"] or  ### Edited by Robin Maurer
       self.model = DistributedDataParallel(self.model,
                                            device_ids=[params.local_rank],
                                            output_device=[params.local_rank],find_unused_parameters=True)
+    # else:
+      #  logging.info("Not using DDP")
 
     self.iters = 0
     self.startEpoch = 0
@@ -351,15 +354,21 @@ class Trainer():
       if dist.get_rank() == 0 and i%(len(self.train_data_loader)//100)==0: logging.info(f"Progress of epoch: {i*100/len(self.train_data_loader)} %, batch: {i}/{len(self.train_data_loader)}") 
     
     try:
-        logs = {'loss': loss, 'loss_step_one': loss_step_one, 'loss_step_two': loss_step_two}
+      logs = {'loss': loss, 'loss_step_one': loss_step_one, 'loss_step_two': loss_step_two, 'compute_time': self.model.compute_time, 'comm_time': self.model.comm_time, 'reformat_time': self.model.reformat_time}
     except:
-        logs = {'loss': loss}
+      try:
+        logs = {'loss': loss, 'compute_time': self.model.compute_time, 'comm_time': self.model.comm_time, 'reformat_time': self.model.reformat_time}
+      except:
+        try:
+          logs = {'loss': loss, 'loss_step_one': loss_step_one, 'loss_step_two': loss_step_two}
+        except:
+          logs = {'loss': loss}
 
-    #time measurement
-    if type(self.model) == AFNONetMPDP:
-      logs['compute_time'] = self.model.compute_time
-      logs['comm_time'] = self.model.comm_time
-      logs['reformat_time'] = self.model.reformat_time
+    # #time measurement
+    # if type(self.model) == AFNONetMPDP:
+    #   logs['compute_time'] = self.model.compute_time
+    #   logs['comm_time'] = self.model.comm_time
+    #   logs['reformat_time'] = self.model.reformat_time
 
     if dist.is_initialized():
       for key in sorted(logs.keys()):
@@ -368,7 +377,8 @@ class Trainer():
         except:
           dist.all_reduce(logs[key],op=dist.ReduceOp.AVG,group=dp_group)
         # logs[key] = float(logs[key]/(get_world_size())/mp_size)   ### Edited by Robin Maurer
-
+    if world_rank == 0:
+       print("comm_time:", self.model.comm_time, "compute_time:", self.model.compute_time, "reformat_time:", self.model.reformat_time)
     if self.params.log_to_wandb:
       wandb.log(logs, step=self.epoch)
 
