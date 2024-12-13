@@ -670,7 +670,8 @@ if __name__ == '__main__':
   # this will be the wandb name
 #  params['name'] = args.config + '_' + str(args.run_num)
 #  params['group'] = "era5_wind" + args.config
-  params['name'] = args.config + '_' + str(args.run_num) + '_' + str(params['nettype']) + '_mp' + str(params['mp_size']) 
+  # params['name'] = args.config + '_' + str(args.run_num) + '_' + str(params['nettype']) + '_mp' + str(params['mp_size']) 
+  params['name'] = args.config + '_' + "blow_up_mp" + str(params['mp_size']) 
   # params['group'] = "era5_precip" + args.config
   params['project'] = "Masterthesis"
   params['entity'] = "ramlatch-karlsruhe-institute-of-technology"

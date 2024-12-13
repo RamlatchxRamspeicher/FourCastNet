@@ -78,7 +78,7 @@ afno_backbone: &backbone
   time_means_path:   '/hkfs/work/workspace/scratch/ie5012-MA/data/stats/time_means.npy'
   global_means_path: '/hkfs/work/workspace/scratch/ie5012-MA/data/stats/global_means.npy'
   global_stds_path:  '/hkfs/work/workspace/scratch/ie5012-MA/data/stats/global_stds.npy'
-  group: 'Final_Torch_batchsize_1'
+  group: 'Final_Torch_batchsize_1_blow_up'
 
 afno_backbone_orography: &backbone_orography 
   <<: *backbone
@@ -100,224 +100,224 @@ afno_8GPU_1:
   max_epochs: 50
   batch_size: 1
   mp_size: 1
-  group: '8GPU_strong'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/8GPU_strong/1'
+  group: '8GPU_strong_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/8GPU_strong/1'
 
 afno_8GPU_2_strong:
   <<: *backbone
   max_epochs: 50
   batch_size: 1
   mp_size: 2
-  group: '8GPU_strong'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/8GPU_strong/2'
+  group: '8GPU_strong_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/8GPU_strong/2'
 
 afno_8GPU_2_weak:
   <<: *backbone
   max_epochs: 50
   batch_size: 2
   mp_size: 2
-  group: '8GPU_weak'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/8GPU_weak/2'
+  group: '8GPU_weak_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/8GPU_weak/2'
 
 afno_8GPU_4_strong:
   <<: *backbone
   max_epochs: 50
   batch_size: 1
   mp_size: 4
-  group: '8GPU_strong'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/8GPU_strong/4'
+  group: '8GPU_strong_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/8GPU_strong/4'
 
 afno_8GPU_4_weak:
   <<: *backbone
   max_epochs: 50
   batch_size: 4
   mp_size: 4
-  group: '8GPU_weak'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/8GPU_weak/4'
+  group: '8GPU_weak_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/8GPU_weak/4'
 
 afno_8GPU_8_strong:
   <<: *backbone
   max_epochs: 50
   batch_size: 1
   mp_size: 8
-  group: '8GPU_strong'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/8GPU_strong/8'
+  group: '8GPU_strong_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/8GPU_strong/8'
 
 afno_8GPU_8_weak:
   <<: *backbone
   max_epochs: 50
   batch_size: 8
   mp_size: 8
-  group: '8GPU_weak'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/8GPU_weak/8'
+  group: '8GPU_weak_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/8GPU_weak/8'
 
 afno_16GPU_1:
   <<: *backbone
   max_epochs: 50
   batch_size: 1
   mp_size: 1
-  group: '16GPU_strong'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/16GPU_strong/1'
+  group: '16GPU_strong_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/16GPU_strong/1'
 
 afno_16GPU_2_strong:
   <<: *backbone
   max_epochs: 50
   batch_size: 1
   mp_size: 2
-  group: '16GPU_strong'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/16GPU_strong/2'
+  group: '16GPU_strong_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/16GPU_strong/2'
 
 afno_16GPU_2_weak:
   <<: *backbone
   max_epochs: 50
   batch_size: 2
   mp_size: 2
-  group: '16GPU_weak'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/16GPU_weak/2'
+  group: '16GPU_weak_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/16GPU_weak/2'
 
 afno_16GPU_4_strong:
   <<: *backbone
   max_epochs: 50
   batch_size: 1
   mp_size: 4
-  group: '16GPU_strong'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/16GPU_strong/4'
+  group: '16GPU_strong_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/16GPU_strong/4'
 
 afno_16GPU_4_weak:
   <<: *backbone
   max_epochs: 50
   batch_size: 4
   mp_size: 4
-  group: '16GPU_weak'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/16GPU_weak/4'
+  group: '16GPU_weak_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/16GPU_weak/4'
 
 afno_16GPU_8_strong:
   <<: *backbone
   max_epochs: 50
   batch_size: 1
   mp_size: 8
-  group: '16GPU_strong'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/16GPU_strong/8'
+  group: '16GPU_strong_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/16GPU_strong/8'
 
 afno_16GPU_8_weak:
   <<: *backbone
   max_epochs: 50
   batch_size: 8
   mp_size: 8
-  group: '16GPU_weak'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/16GPU_weak/8'
+  group: '16GPU_weak_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/16GPU_weak/8'
 
 afno_32GPU_1:
   <<: *backbone
   max_epochs: 50
   batch_size: 1
   mp_size: 1
-  group: '32GPU_strong'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/32GPU_strong/1'
+  group: '32GPU_strong_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/32GPU_strong/1'
 
 afno_32GPU_2_strong:
   <<: *backbone
   max_epochs: 50
   batch_size: 1
   mp_size: 2
-  group: '32GPU_strong'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/32GPU_strong/2'
+  group: '32GPU_strong_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/32GPU_strong/2'
 
 afno_32GPU_2_weak:
   <<: *backbone
   max_epochs: 50
   batch_size: 2
   mp_size: 2
-  group: '32GPU_weak'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/32GPU_weak/2'
+  group: '32GPU_weak_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/32GPU_weak/2'
 
 afno_32GPU_4_strong:
   <<: *backbone
   max_epochs: 50
   batch_size: 1
   mp_size: 4
-  group: '32GPU_strong'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/32GPU_strong/4'
+  group: '32GPU_strong_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/32GPU_strong/4'
 
 afno_32GPU_4_weak:
   <<: *backbone
   max_epochs: 50
   batch_size: 4
   mp_size: 4
-  group: '32GPU_weak'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/32GPU_weak/4'
+  group: '32GPU_weak_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/32GPU_weak/4'
 
 afno_32GPU_8_strong:
   <<: *backbone
   max_epochs: 50
   batch_size: 1
   mp_size: 8
-  group: '32GPU_strong'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/32GPU_strong/8'
+  group: '32GPU_strong_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/32GPU_strong/8'
 
 afno_32GPU_8_weak:
   <<: *backbone
   max_epochs: 50
   batch_size: 8
   mp_size: 8
-  group: '32GPU_weak'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/32GPU_weak/8'
+  group: '32GPU_weak_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/32GPU_weak/8'
 
 afno_64GPU_1:
   <<: *backbone
   max_epochs: 50
   batch_size: 1
   mp_size: 1
-  group: '64GPU_strong'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/64GPU_strong/1'
+  group: '64GPU_strong_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/64GPU_strong/1'
 
 afno_64GPU_2_strong:
   <<: *backbone
   max_epochs: 50
   batch_size: 1
   mp_size: 2
-  group: '64GPU_strong'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/64GPU_strong/2'
+  group: '64GPU_strong_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/64GPU_strong/2'
 
 afno_64GPU_2_weak:
   <<: *backbone
   max_epochs: 50
   batch_size: 2
   mp_size: 2
-  group: '64GPU_weak'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/64GPU_weak/2'
+  group: '64GPU_weak_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/64GPU_weak/2'
 
 afno_64GPU_4_strong:
   <<: *backbone
   max_epochs: 50
   batch_size: 1
   mp_size: 4
-  group: '64GPU_strong'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/64GPU_strong/4'
+  group: '64GPU_strong_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/64GPU_strong/4'
 
 afno_64GPU_4_weak:
   <<: *backbone
   max_epochs: 50
   batch_size: 4
   mp_size: 4
-  group: '64GPU_weak'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/64GPU_weak/4'
+  group: '64GPU_weak_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/64GPU_weak/4'
 
 afno_64GPU_8_strong:
   <<: *backbone
   max_epochs: 50
   batch_size: 1
   mp_size: 8
-  group: '64GPU_strong'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/64GPU_strong/8'
+  group: '64GPU_strong_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/64GPU_strong/8'
 
 afno_64GPU_8_weak:
   <<: *backbone
   max_epochs: 50
   batch_size: 8
   mp_size: 8
-  group: '64GPU_weak'
-  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling/64GPU_weak/8'
+  group: '64GPU_weak_blow_up'
+  exp_dir: '/hkfs/work/workspace/scratch/ie5012-MA/results/scaling_blow_up/64GPU_weak/8'
 
 perturbations:
   <<: *backbone

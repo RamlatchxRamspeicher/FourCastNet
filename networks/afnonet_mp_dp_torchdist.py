@@ -419,9 +419,9 @@ class AFNONetMPDP(nn.Module):
 
         self.h = img_size[0] // self.patch_size[0]
         self.w = img_size[1] // self.patch_size[1]
-
+        self.blow_up = True
         self.blocks = nn.ModuleList([
-            Block(dim=embed_dim//mp_size, mlp_ratio=mlp_ratio, drop=drop_rate, drop_path=dpr[i], norm_layer=norm_layer,
+            Block(dim=embed_dim//mp_size if not self.blow_up else embed_dim, mlp_ratio=mlp_ratio, drop=drop_rate, drop_path=dpr[i], norm_layer=norm_layer,
             num_blocks=self.num_blocks, sparsity_threshold=sparsity_threshold, hard_thresholding_fraction=hard_thresholding_fraction,
             input_parallel=False if i == 0 else True, output_parallel=True if i < depth-1 else False, mp_size=mp_size) 
         for i in range(depth)]) #NumBlocks = Diagonalmatrix von Attention
