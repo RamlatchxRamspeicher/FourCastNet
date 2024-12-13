@@ -354,21 +354,10 @@ class Trainer():
       if dist.get_rank() == 0 and i%(len(self.train_data_loader)//100)==0: logging.info(f"Progress of epoch: {i*100/len(self.train_data_loader)} %, batch: {i}/{len(self.train_data_loader)}") 
     
     try:
-      logs = {'loss': loss, 'loss_step_one': loss_step_one, 'loss_step_two': loss_step_two, 'compute_time': self.model.compute_time, 'comm_time': self.model.comm_time, 'reformat_time': self.model.reformat_time}
+      logs = {'loss': loss, 'loss_step_one': loss_step_one, 'loss_step_two': loss_step_two}
     except:
-      try:
-        logs = {'loss': loss, 'compute_time': self.model.compute_time, 'comm_time': self.model.comm_time, 'reformat_time': self.model.reformat_time}
-      except:
-        try:
-          logs = {'loss': loss, 'loss_step_one': loss_step_one, 'loss_step_two': loss_step_two}
-        except:
-          logs = {'loss': loss}
+      logs = {'loss': loss}
 
-    # #time measurement
-    # if type(self.model) == AFNONetMPDP:
-    #   logs['compute_time'] = self.model.compute_time
-    #   logs['comm_time'] = self.model.comm_time
-    #   logs['reformat_time'] = self.model.reformat_time
 
     if dist.is_initialized():
       for key in sorted(logs.keys()):
@@ -377,6 +366,11 @@ class Trainer():
         except:
           dist.all_reduce(logs[key],op=dist.ReduceOp.AVG,group=dp_group)
         # logs[key] = float(logs[key]/(get_world_size())/mp_size)   ### Edited by Robin Maurer
+    #time measurement
+    if type(self.model) == AFNONetMPDP:
+      logs['compute_time'] = self.model.compute_time
+      logs['comm_time'] = self.model.comm_time
+      logs['reformat_time'] = self.model.reformat_time
     if world_rank == 0:
        print("comm_time:", self.model.comm_time, "compute_time:", self.model.compute_time, "reformat_time:", self.model.reformat_time)
     if self.params.log_to_wandb:
