@@ -74,7 +74,8 @@ logging_utils.config_logger()
 from utils.YParams import YParams
 from utils.data_loader_multifiles import get_data_loader
 from networks.afnonet import AFNONet, PrecipNet
-from networks.afnonet_mp_dp_torchdist import AFNONetMPDP
+# from networks.afnonet_mp_dp_torchdist import AFNONetMPDP
+from networks.afnonet_mp_dp_torchdist_blow_up import AFNONetMPDP
 from utils.img_utils import vis_precip
 import wandb
 from utils.weighted_acc_rmse import weighted_acc, weighted_rmse, weighted_rmse_torch, unlog_tp_torch
@@ -371,8 +372,15 @@ class Trainer():
       logs['compute_time'] = self.model.compute_time
       logs['comm_time'] = self.model.comm_time
       logs['reformat_time'] = self.model.reformat_time
+    else:
+      logs['compute_time'] = tr_time - comm_grad_time
+      logs['comm_time'] = comm_grad_time
+      logs['reformat_time'] = 0
     if world_rank == 0:
-       print("comm_time:", self.model.comm_time, "compute_time:", self.model.compute_time, "reformat_time:", self.model.reformat_time)
+      try:
+        print("comm_time:", self.model.comm_time, "compute_time:", self.model.compute_time, "reformat_time:", self.model.reformat_time)
+      except:
+        ...
     if self.params.log_to_wandb:
       wandb.log(logs, step=self.epoch)
 

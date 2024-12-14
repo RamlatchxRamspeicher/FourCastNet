@@ -111,7 +111,6 @@ class AllReduceBcast(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input, mp_size):
         ctx.mp_size = mp_size
-        return input
         if dist.get_world_size() == 1:
             return input
         input = allreduceWrapper(input, mp_size)
@@ -123,7 +122,21 @@ class AllReduceBcast(torch.autograd.Function):
         grad_output = broadcastWrapper(grad_output,ctx.mp_size)
         return grad_output, None, None, None
         
+class BcastAllReduce(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input, mp_size):
+        if dist.get_world_size() == 1:
+            return grad_output
+        grad_output = broadcastWrapper(grad_output,ctx.mp_size)
+        ctx.mp_size = mp_size
+        return grad_output, None, None, None  
     
+    def backward(ctx, grad_output):
+        if dist.get_world_size() == 1:
+            return input
+        input = allreduceWrapper(input, ctx.mp_size)
+        return input
+          
 
 class ScatterGather(torch.autograd.Function):
     @staticmethod
@@ -319,6 +332,8 @@ class Block(nn.Module):
         self.double_skip = double_skip
         self.scatter_fn = ScatterGather.apply
         self.gather_fn = GatherScatter.apply
+        self.bcast_fn = BcastAllReduce.apply
+        self.allreduce_fn = AllReduceBcast.apply
         self.mp_size = mp_size
         
 
@@ -329,7 +344,7 @@ class Block(nn.Module):
         if not self.input_parallel:
             #print(x.shape)
             # x = self.scatter_fn(x, self.mp_size, rank, mp_group)
-            x = self.scatter_fn(x, self.mp_size, rank)
+            x = self.bcast_fn(x, self.mp_size, rank)
             # device = next(self.parameters()).device  # oder z.B. torch.device("cuda:0")
             # x = x.to(device)
 
@@ -349,7 +364,7 @@ class Block(nn.Module):
         if not self.output_parallel:
             #print(x.shape)
             # x = self.gather_fn(x, self.mp_size, rank, mp_group)
-            x = self.gather_fn(x, self.mp_size, rank)
+            x = self.allreduce_fn(x, self.mp_size, rank)
             #print(x.shape)
         return x
 
@@ -419,7 +434,7 @@ class AFNONetMPDP(nn.Module):
 
         self.h = img_size[0] // self.patch_size[0]
         self.w = img_size[1] // self.patch_size[1]
-        self.blow_up = False
+        self.blow_up = True
         self.blocks = nn.ModuleList([
             Block(dim=embed_dim//mp_size if not self.blow_up else embed_dim, mlp_ratio=mlp_ratio, drop=drop_rate, drop_path=dpr[i], norm_layer=norm_layer,
             num_blocks=self.num_blocks, sparsity_threshold=sparsity_threshold, hard_thresholding_fraction=hard_thresholding_fraction,
