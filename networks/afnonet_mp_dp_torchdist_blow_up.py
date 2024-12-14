@@ -126,16 +126,16 @@ class BcastAllReduce(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input, mp_size):
         if dist.get_world_size() == 1:
-            return grad_output
-        grad_output = broadcastWrapper(grad_output,ctx.mp_size)
+            return input
+        input = broadcastWrapper(input,ctx.mp_size)
         ctx.mp_size = mp_size
-        return grad_output, None, None, None  
+        return input, None, None, None  
     
     def backward(ctx, grad_output):
         if dist.get_world_size() == 1:
-            return input
-        input = allreduceWrapper(input, ctx.mp_size)
-        return input
+            return grad_output
+        grad_output = allreduceWrapper(grad_output, ctx.mp_size)
+        return grad_output
           
 
 class ScatterGather(torch.autograd.Function):
@@ -344,7 +344,7 @@ class Block(nn.Module):
         if not self.input_parallel:
             #print(x.shape)
             # x = self.scatter_fn(x, self.mp_size, rank, mp_group)
-            x = self.bcast_fn(x, self.mp_size, rank)
+            x = self.bcast_fn(x, self.mp_size)
             # device = next(self.parameters()).device  # oder z.B. torch.device("cuda:0")
             # x = x.to(device)
 
@@ -364,7 +364,7 @@ class Block(nn.Module):
         if not self.output_parallel:
             #print(x.shape)
             # x = self.gather_fn(x, self.mp_size, rank, mp_group)
-            x = self.allreduce_fn(x, self.mp_size, rank)
+            x = self.allreduce_fn(x, self.mp_size)
             #print(x.shape)
         return x
 

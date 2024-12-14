@@ -380,7 +380,7 @@ class Trainer():
       try:
         print("comm_time:", self.model.comm_time, "compute_time:", self.model.compute_time, "reformat_time:", self.model.reformat_time)
       except:
-        ...
+        pass
     if self.params.log_to_wandb:
       wandb.log(logs, step=self.epoch)
 
