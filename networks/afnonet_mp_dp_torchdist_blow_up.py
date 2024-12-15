@@ -125,17 +125,17 @@ class AllReduceBcast(torch.autograd.Function):
 class BcastAllReduce(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input, mp_size):
+        ctx.mp_size = mp_size
         if dist.get_world_size() == 1:
             return input
-        input = broadcastWrapper(input,ctx.mp_size)
-        ctx.mp_size = mp_size
-        return input, None, None, None  
+        input = broadcastWrapper(input,mp_size)
+        return input
     
     def backward(ctx, grad_output):
         if dist.get_world_size() == 1:
             return grad_output
         grad_output = allreduceWrapper(grad_output, ctx.mp_size)
-        return grad_output
+        return grad_output, None, None, None  
           
 
 class ScatterGather(torch.autograd.Function):
