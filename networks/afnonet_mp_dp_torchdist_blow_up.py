@@ -55,22 +55,22 @@ def create_mp_group(mp_size):
 
 
 def allreduceWrapper(input:torch.Tensor, mp_size):
-    dp_size= dist.get_world_size()//mp_size
-    dist.all_reduce(input, op=dist.ReduceOp.SUM,group=dp_group)
-    ret = torch.div(input,dp_size)
+    dist.all_reduce(input, op=dist.ReduceOp.SUM,group=mp_group)
+    ret = torch.div(input,mp_size)
     return ret
 
 def broadcastWrapper(input, mp_size):
     if mp_size > 1:
         rank = dist.get_rank()
         src = rank - rank % mp_size
+        input = input.contiguous()
         dist.broadcast(input, src=src, group=mp_group)
     return input
 
 def scatterWrapper(input, mp_size, rank):
     global comm_time, reformat_time                     ## Time measurement
     re_start_time = time.time()                         ## Time measurement
-    rearranged_input = input.permute(3,0,1,2)
+    rearranged_input = input.permute(3,0,1,2,4)
     rearranged_input = rearranged_input.contiguous()
     reformat_time += time.time() - re_start_time        ## Time measurement
     src = rank - rank % mp_size
@@ -82,7 +82,7 @@ def scatterWrapper(input, mp_size, rank):
     dist.scatter(received_tensor,split_tensors if src == rank else None, src=src,group=mp_group)
     comm_time += time.time() - comm_start_time          ## Time measurement
     re_start_time = time.time()                         ## Time measurement
-    received_tensor_orig_shape = received_tensor.permute(1,2,3,0)
+    received_tensor_orig_shape = received_tensor.permute(1,2,3,0,4)
     received_tensor_orig_shape = received_tensor_orig_shape.contiguous()
     reformat_time += time.time() - re_start_time        ## Time measurement
     return received_tensor_orig_shape
@@ -90,7 +90,7 @@ def scatterWrapper(input, mp_size, rank):
 def gatherWrapper(input, mp_size, rank, device):
     global comm_time, reformat_time
     re_start_time = time.time()                         ## Time measurement
-    rearranged_input = input.permute(3,0,1,2)
+    rearranged_input = input.permute(3,0,1,2,4)
     rearranged_input = rearranged_input.contiguous()
     reformat_time += time.time() - re_start_time        ## Time measurement
     gathered_tensor_list = [
@@ -102,7 +102,7 @@ def gatherWrapper(input, mp_size, rank, device):
     gathered_tensor = [t.to(device) for t in gathered_tensor_list]            
     received_tensor = torch.cat(gathered_tensor, dim=0) if gathered_tensor is not None else None
     re_start_time = time.time()                         ## Time measurement
-    gathered_tensor_orig_shape = received_tensor.permute(1,2,3,0).contiguous()
+    gathered_tensor_orig_shape = received_tensor.permute(1,2,3,0,4).contiguous()
     reformat_time += time.time() - re_start_time        ## Time measurement
     return gathered_tensor_orig_shape
 
@@ -111,13 +111,13 @@ class AllReduceBcast(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input, mp_size):
         ctx.mp_size = mp_size
-        if dist.get_world_size() == 1:
+        if dist.get_world_size() == 1 or mp_size == 1:
             return input
         input = allreduceWrapper(input, mp_size)
         return input
     
     def backward(ctx, grad_output):
-        if dist.get_world_size() == 1:
+        if dist.get_world_size() == 1 or ctx.mp_size == 1:
             return grad_output
         grad_output = broadcastWrapper(grad_output,ctx.mp_size)
         return grad_output, None, None, None
@@ -126,13 +126,13 @@ class BcastAllReduce(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input, mp_size):
         ctx.mp_size = mp_size
-        if dist.get_world_size() == 1:
+        if dist.get_world_size() == 1 or mp_size == 1:
             return input
         input = broadcastWrapper(input,mp_size)
         return input
     
     def backward(ctx, grad_output):
-        if dist.get_world_size() == 1:
+        if dist.get_world_size() == 1 or ctx.mp_size == 1:
             return grad_output
         grad_output = allreduceWrapper(grad_output, ctx.mp_size)
         return grad_output, None, None, None  
@@ -231,17 +231,23 @@ class Mlp(nn.Module):
 
 
 class AFNO2D(nn.Module):
-    def __init__(self, hidden_size, num_blocks=8, sparsity_threshold=0.01, hard_thresholding_fraction=1, hidden_size_factor=1):
+    def __init__(self, hidden_size, num_blocks=8, sparsity_threshold=0.01, hard_thresholding_fraction=1, hidden_size_factor=1, mp_size=1):
         super().__init__()
         assert hidden_size % (num_blocks) == 0, f"hidden_size {hidden_size} should be divisble by {num_blocks} (num_blocks {num_blocks})"
         
+        self.mp_size = mp_size
         self.hidden_size = hidden_size #768 
         self.sparsity_threshold = sparsity_threshold
-        self.num_blocks = num_blocks #8
-        self.block_size = (self.hidden_size // self.num_blocks)  #96/world_size
+        self.global_num_blocks = num_blocks #8
+        self.global_block_size = (self.hidden_size // self.global_num_blocks)
+        self.num_blocks = num_blocks//mp_size
+        self.block_size = self.global_block_size
         self.hard_thresholding_fraction = hard_thresholding_fraction
         self.hidden_size_factor = hidden_size_factor
         self.scale = 0.02
+        self.scatter_fn = ScatterGather.apply
+        self.gather_fn = GatherScatter.apply
+
 
         # w1.shape = 2, 8, 96/world_size, 768; w2.shape = 2, 8, 768, 96/world_size; b1.shape = 2, 8, 768; b2.shape = 2, 8, 96/world_size
         self.w1 = nn.Parameter(self.scale * torch.randn(2, self.num_blocks, self.block_size, self.block_size * self.hidden_size_factor))
@@ -251,14 +257,15 @@ class AFNO2D(nn.Module):
 
     def forward(self, x):
         bias = x
-
+        rank = MPI.COMM_WORLD.Get_rank()
         dtype = x.dtype
         x = x.float()
         B, H, W, C = x.shape #2, 90, 180, 768 = 2*90*180*768 = 24883200
 
         x = torch.fft.rfft2(x, dim=(1, 2), norm="ortho")
-        x = x.reshape(B, H, W // 2 + 1, self.num_blocks, self.block_size) #2, 90, 91, 8, 96/world_size = 2*90*91*8*96/world_size = 12874680/world_size
-
+        x = x.reshape(B, H, W // 2 + 1, self.global_num_blocks, self.global_block_size) #2, 90, 91, 8, 96/world_size = 2*90*91*8*96/world_size = 12874680/world_size
+        x = self.scatter_fn(x, self.mp_size, rank)
+        
         o1_real = torch.zeros([B, H, W // 2 + 1, self.num_blocks, self.block_size * self.hidden_size_factor], device=x.device)
         o1_imag = torch.zeros([B, H, W // 2 + 1, self.num_blocks, self.block_size * self.hidden_size_factor], device=x.device)
         o2_real = torch.zeros(x.shape, device=x.device)
@@ -295,6 +302,7 @@ class AFNO2D(nn.Module):
         x = torch.stack([o2_real, o2_imag], dim=-1) #2, 46, 91, 8, 96/world_size, 2
         x = F.softshrink(x, lambd=self.sparsity_threshold)
         x = torch.view_as_complex(x) #2, 46, 91, 8, 96/world_size, 2
+        x = self.gather_fn(x, self.mp_size)
         x = x.reshape(B, H, W // 2 + 1, C) # 2, 90, 91, 768
         x = torch.fft.irfft2(x, s=(H, W), dim=(1,2), norm="ortho") #2, 90, 180, 768
         x = x.type(dtype)
@@ -324,7 +332,7 @@ class Block(nn.Module):
         self.input_parallel = input_parallel
         self.output_parallel = output_parallel
         self.norm1 = norm_layer(dim)
-        self.filter = AFNO2D(dim, num_blocks, sparsity_threshold, hard_thresholding_fraction) 
+        self.filter = AFNO2D(dim, num_blocks, sparsity_threshold, hard_thresholding_fraction, mp_size=mp_size) 
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
@@ -341,16 +349,17 @@ class Block(nn.Module):
         global comm_time
         rank = MPI.COMM_WORLD.Get_rank()
         # mp_group = create_mp_comm_group(self.mp_size)
-        if not self.input_parallel:
-            #print(x.shape)
-            # x = self.scatter_fn(x, self.mp_size, rank, mp_group)
-            x = self.bcast_fn(x, self.mp_size)
-            # device = next(self.parameters()).device  # oder z.B. torch.device("cuda:0")
-            # x = x.to(device)
+        # if not self.input_parallel:
+        #     #print(x.shape)
+        #     # x = self.scatter_fn(x, self.mp_size, rank, mp_group)
+        #     x = self.bcast_fn(x, self.mp_size)
+        #     # device = next(self.parameters()).device  # oder z.B. torch.device("cuda:0")
+        #     # x = x.to(device)
 
-            #print(x.shape)
+        #     #print(x.shape)
         residual = x
         x = self.norm1(x)
+        
         x = self.filter(x)
 
         if self.double_skip:
@@ -361,11 +370,11 @@ class Block(nn.Module):
         x = self.mlp(x)
         x = self.drop_path(x)
         x = x + residual
-        if not self.output_parallel:
-            #print(x.shape)
-            # x = self.gather_fn(x, self.mp_size, rank, mp_group)
-            x = self.allreduce_fn(x, self.mp_size)
-            #print(x.shape)
+        # if not self.output_parallel:
+        #     #print(x.shape)
+        #     # x = self.gather_fn(x, self.mp_size, rank, mp_group)
+        #     x = self.allreduce_fn(x, self.mp_size)
+        #     #print(x.shape)
         return x
 
 class PrecipNet(nn.Module):
@@ -434,9 +443,9 @@ class AFNONetMPDP(nn.Module):
 
         self.h = img_size[0] // self.patch_size[0]
         self.w = img_size[1] // self.patch_size[1]
-        self.blow_up = True
+        
         self.blocks = nn.ModuleList([
-            Block(dim=embed_dim//mp_size if not self.blow_up else embed_dim, mlp_ratio=mlp_ratio, drop=drop_rate, drop_path=dpr[i], norm_layer=norm_layer,
+            Block(dim=embed_dim, mlp_ratio=mlp_ratio, drop=drop_rate, drop_path=dpr[i], norm_layer=norm_layer,
             num_blocks=self.num_blocks, sparsity_threshold=sparsity_threshold, hard_thresholding_fraction=hard_thresholding_fraction,
             input_parallel=False if i == 0 else True, output_parallel=True if i < depth-1 else False, mp_size=mp_size) 
         for i in range(depth)]) #NumBlocks = Diagonalmatrix von Attention
