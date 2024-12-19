@@ -302,7 +302,7 @@ class AFNO2D(nn.Module):
         x = torch.stack([o2_real, o2_imag], dim=-1) #2, 46, 91, 8, 96/world_size, 2
         x = F.softshrink(x, lambd=self.sparsity_threshold)
         x = torch.view_as_complex(x) #2, 46, 91, 8, 96/world_size, 2
-        x = self.gather_fn(x, self.mp_size)
+        x = self.gather_fn(x, self.mp_size, rank)
         x = x.reshape(B, H, W // 2 + 1, C) # 2, 90, 91, 768
         x = torch.fft.irfft2(x, s=(H, W), dim=(1,2), norm="ortho") #2, 90, 180, 768
         x = x.type(dtype)
@@ -361,7 +361,7 @@ class Block(nn.Module):
         x = self.norm1(x)
         
         x = self.filter(x)
-
+        dist.barrier(group=mp_group)
         if self.double_skip:
             x = x + residual
             residual = x

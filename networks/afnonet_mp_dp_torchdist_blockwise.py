@@ -355,10 +355,10 @@ class Block(nn.Module):
         residual = x
         x = self.norm1(x)
 
-        x = self.scatter_fn(x, self.mp_size)
+        x = self.scatter_fn(x, self.mp_size,rank)
         
         x = self.filter(x)
-        x = self.gather_fn(x, self.mp_size)
+        x = self.gather_fn(x, self.mp_size,rank)
         dist.barrier()
         if self.double_skip:
             x = x + residual

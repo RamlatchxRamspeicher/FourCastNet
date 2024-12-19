@@ -75,7 +75,7 @@ from utils.YParams import YParams
 from utils.data_loader_multifiles import get_data_loader
 from networks.afnonet import AFNONet, PrecipNet
 # from networks.afnonet_mp_dp_torchdist import AFNONetMPDP
-from networks.afnonet_mp_dp_torchdist_blow_up import AFNONetMPDP
+from networks.afnonet_mp_dp_torchdist_blockwise import AFNONetMPDP
 from utils.img_utils import vis_precip
 import wandb
 from utils.weighted_acc_rmse import weighted_acc, weighted_rmse, weighted_rmse_torch, unlog_tp_torch
@@ -679,7 +679,7 @@ if __name__ == '__main__':
 #  params['name'] = args.config + '_' + str(args.run_num)
 #  params['group'] = "era5_wind" + args.config
   # params['name'] = args.config + '_' + str(args.run_num) + '_' + str(params['nettype']) + '_mp' + str(params['mp_size']) 
-  params['name'] = args.config + '_' + "blow_up_mp" + str(params['mp_size']) 
+  params['name'] = args.config + '_' + "blockwise_mp" + str(params['mp_size']) 
   # params['group'] = "era5_precip" + args.config
   params['project'] = "Masterthesis"
   params['entity'] = "ramlatch-karlsruhe-institute-of-technology"
